@@ -1,0 +1,481 @@
+import { useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { BackButton } from '../components/ui/BackButton';
+import { Button } from '../components/ui/Button';
+import { Breadcrumb, Card, KPICard } from '../components/ui/Card';
+import { Input, Select, Textarea } from '../components/ui/Input';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import {
+  formatCurrency,
+  formatDate,
+  formatQty,
+  getJobPendingTotal,
+  getJobReceivedTotal,
+  getJobSentTotal,
+} from '../data/mockData';
+import { useAppStore } from '../store/useAppStore';
+
+const TIMELINE_STEPS = ['Job Created', 'Material Dispatched', 'Vendor Processing', 'Partial Receipt', 'QC', 'Completed'];
+
+const TABS = ['Overview', 'Items', 'Lifecycle', 'Payments', 'Activity'];
+
+export function JobWorkDetailPage() {
+  const { id } = useParams();
+  const jobWorks = useAppStore((s) => s.jobWorks);
+  const dispatches = useAppStore((s) => s.dispatches);
+  const receipts = useAppStore((s) => s.receipts);
+  const activityLogs = useAppStore((s) => s.activityLogs);
+  const payments = useAppStore((s) => s.payments);
+  const vendors = useAppStore((s) => s.vendors);
+  const products = useAppStore((s) => s.products);
+  const addPayment = useAppStore((s) => s.addPayment);
+  const [activeTab, setActiveTab] = useState('Overview');
+  const [paymentForm, setPaymentForm] = useState({
+    paymentType: 'Advance' as 'Advance' | 'Running' | 'Final' | 'Balance',
+    paid: '',
+    date: new Date().toISOString().slice(0, 10),
+    remarks: '',
+  });
+
+  const job = jobWorks.find((j) => j.id === id);
+  if (!job) return <div className="text-center py-16 text-muted">Job work not found</div>;
+
+  const vendor = vendors.find((v) => v.id === job.vendorId);
+  const jobDispatches = dispatches.filter((d) => d.jobWorkId === job.id);
+  const jobReceipts = receipts.filter((r) => r.jobWorkId === job.id);
+  const jobActivities = activityLogs.filter((a) => a.entityId === job.id);
+  const jobPayments = payments.filter((p) => p.jobWorkId === job.id);
+
+  const timelineIndex = job.status === 'Completed' ? 5 : job.status === 'Partial' ? 3 : job.status === 'Processing' ? 2 : job.status === 'Sent' ? 1 : 0;
+
+  const jobTotalQty = job.items.reduce((s, i) => s + i.sentQuantity, 0);
+  const jobTotalAmount = job.items.reduce((s, i) => s + i.sentQuantity * (i.rate ?? 0), 0);
+  const jobAvgRate = jobTotalQty > 0 ? jobTotalAmount / jobTotalQty : 0;
+
+  // Total already paid across all previous payment entries for this job
+  const alreadyPaid = jobPayments.reduce((s, p) => s + p.paid, 0);
+  const remainingAfterPrevious = Math.max(0, jobTotalAmount - alreadyPaid);
+
+  const paidAmount = Number(paymentForm.paid) || 0;
+
+  // Status for THIS new entry: compare cumulative paid vs total bill
+  const cumulativePaid = alreadyPaid + paidAmount;
+  const derivedStatus: 'Paid' | 'Partial' | 'Pending' =
+    cumulativePaid >= jobTotalAmount && jobTotalAmount > 0
+      ? 'Paid'
+      : cumulativePaid > 0
+      ? 'Partial'
+      : 'Pending';
+
+  const handleAddPayment = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!paidAmount || !job) return;
+
+    addPayment({
+      vendorId: job.vendorId,
+      jobWorkId: job.id,
+      process: job.process,
+      quantity: jobTotalQty,
+      rate: jobAvgRate,
+      amount: jobTotalAmount,  // full bill amount for reference
+      paid: paidAmount,        // this installment only
+      status: derivedStatus,
+      paymentType: paymentForm.paymentType,
+      date: paymentForm.date,
+      remarks: paymentForm.remarks,
+    });
+
+    setPaymentForm({
+      paymentType: 'Running',
+      paid: '',
+      date: new Date().toISOString().slice(0, 10),
+      remarks: '',
+    });
+  };
+
+  return (
+    <div>
+      <div className="space-y-3 mb-6">
+        <BackButton to="/job-works" />
+        <Breadcrumb items={[{ label: 'Job Work', path: '/job-works' }, { label: job.jobNumber }]} />
+      </div>
+
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-charcoal">{job.jobNumber}</h1>
+            <StatusBadge status={job.status} />
+          </div>
+          <div className="flex flex-wrap gap-4 mt-2 text-sm text-muted">
+            <span>Vendor: <strong className="text-charcoal">{vendor?.name}</strong></span>
+            <span>Process: <strong className="text-charcoal">{job.process}</strong></span>
+            <span>Issue: <strong className="text-charcoal">{formatDate(job.issueDate)}</strong></span>
+            <span>Expected: <strong className="text-charcoal">{formatDate(job.expectedReturnDate)}</strong></span>
+          </div>
+        </div>
+
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <KPICard label="Sent" value={formatQty(getJobSentTotal(job), 'Pic')} color="info" />
+        <KPICard label="Received" value={formatQty(getJobReceivedTotal(job), 'Pic')} color="success" />
+        <KPICard label="Pending" value={formatQty(getJobPendingTotal(job), 'Pic')} color="warning" />
+      </div>
+
+      <Card className="mb-6 p-6">
+        <h3 className="text-sm font-semibold mb-4">Progress Timeline</h3>
+        <div className="flex items-center gap-2 overflow-x-auto">
+          {TIMELINE_STEPS.map((step, i) => (
+            <div key={step} className="flex items-center gap-2 shrink-0">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                i <= timelineIndex ? 'bg-brand text-white' : 'bg-surface text-muted border border-border'
+              }`}>
+                {i + 1}
+              </div>
+              <span className={`text-xs ${i <= timelineIndex ? 'text-charcoal font-medium' : 'text-muted'}`}>{step}</span>
+              {i < TIMELINE_STEPS.length - 1 && <div className={`w-8 h-0.5 ${i < timelineIndex ? 'bg-brand' : 'bg-border'}`} />}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <div className="flex gap-1 border-b border-border mb-6 overflow-x-auto">
+        {TABS.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+              activeTab === tab ? 'border-brand text-brand' : 'border-transparent text-muted hover:text-charcoal'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'Overview' && (
+        <Card className="p-6">
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div><span className="text-muted">Priority:</span> <strong>{job.priority}</strong></div>
+            <div><span className="text-muted">Reference:</span> <strong>{job.reference ?? '—'}</strong></div>
+            <div><span className="text-muted">Created By:</span> <strong>{job.createdBy}</strong></div>
+            <div><span className="text-muted">Remarks:</span> <strong>{job.remarks ?? '—'}</strong></div>
+          </div>
+        </Card>
+      )}
+
+      {activeTab === 'Items' && (
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface">
+                  {['Product', 'Variant', 'Sent', 'Received', 'Pending'].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {job.items.map((item) => {
+                  const product = products.find((p) => p.id === item.productId);
+                  const variant = product?.variants.find((v) => v.id === item.variantId);
+                  const pending = Math.max(0, item.sentQuantity - item.receivedQuantity - item.rejectedQuantity - item.lossQuantity);
+                  return (
+                    <tr key={item.id} className="border-b border-border">
+                      <td className="px-4 py-3">{product?.name}</td>
+                      <td className="px-4 py-3">{variant?.name}</td>
+                      <td className="px-4 py-3">{formatQty(item.sentQuantity, product?.unit ?? '')}</td>
+                      <td className="px-4 py-3">{formatQty(item.receivedQuantity, product?.unit ?? '')}</td>
+                      <td className="px-4 py-3 font-medium">{formatQty(pending, product?.unit ?? '')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {activeTab === 'Lifecycle' && (
+        <Card className="p-6 space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-lg bg-surface p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Dispatch / Challan</p>
+              {jobDispatches.length === 0 ? (
+                <p className="text-sm text-muted">No dispatch entry logged for this job yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {jobDispatches.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between gap-3">
+                      <div>
+                        <Link to={`/challans/${d.id}`} className="font-medium text-brand">{d.challanNumber}</Link>
+                        <p className="text-xs text-muted">{formatDate(d.date)} — {d.vehicleNumber || 'Own Vehicle'}</p>
+                      </div>
+                      <span className="text-sm text-charcoal">{d.driver || '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg bg-surface p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Receipts / QC</p>
+              {jobReceipts.length === 0 ? (
+                <p className="text-sm text-muted">No receipt has been recorded yet. QC will appear after material is returned.</p>
+              ) : (
+                <div className="space-y-2">
+                  {jobReceipts.map((r) => (
+                    <div key={r.id}>
+                      <p className="font-medium">{formatDate(r.date)}</p>
+                      <p className="text-xs text-muted">Received by {r.receivedBy} | VC: {r.vendorChallanNumber ?? '—'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border p-4 text-sm text-muted">
+            <span className="font-medium text-charcoal">Lifecycle summary:</span> this job already advances through dispatch and receipt stages as part of one job-work cycle, so the progress is tracked in a single timeline rather than separate sections.
+          </div>
+        </Card>
+      )}
+
+      {activeTab === 'Activity' && (
+        <Card className="p-4">
+          {jobActivities.map((a) => (
+            <div key={a.id} className="flex gap-3 py-3 border-b border-border last:border-0">
+              <div className="w-2 h-2 rounded-full bg-brand mt-2 shrink-0" />
+              <div>
+                <p className="text-sm">{a.message}</p>
+                <p className="text-xs text-muted">{new Date(a.timestamp).toLocaleString('en-IN')} — {a.user}</p>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {activeTab === 'Payments' && (
+        <div className="space-y-4">
+          {/* ── Fully paid banner OR payment form ── */}
+          {remainingAfterPrevious === 0 && jobTotalAmount > 0 ? (
+            <Card className="p-6">
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center">
+                  <span className="text-2xl">✓</span>
+                </div>
+                <h3 className="text-base font-bold text-green-700">Payment Fully Settled</h3>
+                <p className="text-sm text-muted">
+                  {formatCurrency(alreadyPaid)} has been paid in full for this job.
+                </p>
+                <div className="mt-1 rounded-lg bg-green-50 border border-green-200 px-6 py-3 text-sm text-green-700 font-semibold">
+                  {job.jobNumber} · {formatCurrency(jobTotalAmount)} · Paid
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-6">
+              <div className="mb-5">
+                <h3 className="text-sm font-semibold">Record Payment</h3>
+                <p className="text-sm text-muted mt-0.5">
+                  Billed {formatCurrency(jobTotalAmount)} · Paid {formatCurrency(alreadyPaid)} · Remaining {formatCurrency(remainingAfterPrevious)}
+                </p>
+              </div>
+
+              <form onSubmit={handleAddPayment} className="space-y-5">
+                {/* Auto-filled read-only job details */}
+                <div className="rounded-lg bg-surface border border-border p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-xs text-muted mb-1 font-medium uppercase tracking-wide">Vendor</p>
+                    <p className="font-semibold text-charcoal">{vendors.find((v) => v.id === job.vendorId)?.name ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted mb-1 font-medium uppercase tracking-wide">Process</p>
+                    <p className="font-semibold text-charcoal">{job.process}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted mb-1 font-medium uppercase tracking-wide">Total Quantity</p>
+                    <p className="font-semibold text-charcoal">{jobTotalQty.toLocaleString('en-IN')}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted mb-1 font-medium uppercase tracking-wide">Bill Amount</p>
+                    <p className="font-semibold text-charcoal">{formatCurrency(jobTotalAmount)}</p>
+                  </div>
+                </div>
+
+                {/* Editable fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <Select
+                    label="Payment Type"
+                    value={paymentForm.paymentType}
+                    options={[
+                      { value: 'Advance', label: 'Advance' },
+                      { value: 'Running', label: 'Running' },
+                      { value: 'Final', label: 'Final' },
+                      { value: 'Balance', label: 'Balance' },
+                    ]}
+                    onChange={(e) => setPaymentForm((prev) => ({ ...prev, paymentType: e.target.value as typeof prev.paymentType }))}
+                  />
+                  <Input
+                    label="Payment Date"
+                    type="date"
+                    value={paymentForm.date}
+                    onChange={(e) => setPaymentForm((prev) => ({ ...prev, date: e.target.value }))}
+                  />
+                  <div>
+                    <Input
+                      label="Amount to Pay (₹)"
+                      type="number"
+                      min="0"
+                      max={remainingAfterPrevious}
+                      step="0.01"
+                      value={paymentForm.paid}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, paid: e.target.value }))}
+                      placeholder={`Max ₹${remainingAfterPrevious.toLocaleString('en-IN')}`}
+                      required
+                    />
+                  </div>
+                  {/* Live status indicator */}
+                  <div className="flex flex-col justify-end pb-1">
+                    <p className="text-xs text-muted mb-2 font-medium uppercase tracking-wide">Status</p>
+                    <span className={`inline-flex items-center self-start rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                      derivedStatus === 'Paid'
+                        ? 'bg-green-50 text-green-700 border-green-200'
+                        : derivedStatus === 'Partial'
+                        ? 'bg-orange-50 text-orange-700 border-orange-200'
+                        : 'bg-red-50 text-red-700 border-red-200'
+                    }`}>
+                      {derivedStatus === 'Pending' ? 'Unpaid' : derivedStatus}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Textarea
+                    label="Remarks"
+                    value={paymentForm.remarks}
+                    onChange={(e) => setPaymentForm((prev) => ({ ...prev, remarks: e.target.value }))}
+                    placeholder="Payment notes, reference, etc."
+                  />
+                  {/* Balance preview */}
+                  <div className="rounded-lg bg-surface border border-border p-4 text-sm space-y-2 self-start mt-auto">
+                    <div className="flex justify-between">
+                      <span className="text-muted">Total Bill</span>
+                      <span className="font-semibold">{formatCurrency(jobTotalAmount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted">Already Paid</span>
+                      <span className="font-semibold text-success">{formatCurrency(alreadyPaid)}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-border pt-2">
+                      <span className="text-muted">Due Before This</span>
+                      <span className="font-semibold text-danger">{formatCurrency(remainingAfterPrevious)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted">Paying Now</span>
+                      <span className="font-semibold text-brand">{formatCurrency(paidAmount)}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-border pt-2">
+                      <span className="text-muted">Remaining After</span>
+                      <span className={`font-bold ${Math.max(0, jobTotalAmount - cumulativePaid) > 0 ? 'text-danger' : 'text-success'}`}>
+                        {formatCurrency(Math.max(0, jobTotalAmount - cumulativePaid))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={!paidAmount || paidAmount > remainingAfterPrevious}>
+                    Save Payment
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          )}
+
+          {/* Payment history for this job */}
+          <Card>
+            <div className="px-6 pt-5 pb-3 flex items-center justify-between">
+              <h4 className="text-sm font-semibold">Payment History</h4>
+              {jobPayments.length > 0 && (
+                <div className="text-sm text-muted">
+                  <span className="text-success font-semibold">{formatCurrency(alreadyPaid)}</span>
+                  <span> paid of </span>
+                  <span className="font-semibold">{formatCurrency(jobTotalAmount)}</span>
+                  {remainingAfterPrevious > 0 && (
+                    <span className="ml-2 text-danger font-semibold">· {formatCurrency(remainingAfterPrevious)} due</span>
+                  )}
+                </div>
+              )}
+            </div>
+            {jobPayments.length === 0 ? (
+              <p className="px-6 pb-6 text-muted text-sm">No payments recorded for this job yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-surface">
+                      {['#', 'Type', 'Date', 'Paid (this entry)', 'Cumulative Paid', 'Remaining', 'Status', 'Remarks'].map((h) => (
+                        <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      let running = 0;
+                      return jobPayments.map((p, i) => {
+                        running += p.paid;
+                        const remaining = Math.max(0, jobTotalAmount - running);
+                        // derive status from cumulative, not stored value
+                        const status: 'Paid' | 'Partial' | 'Pending' =
+                          running >= jobTotalAmount && jobTotalAmount > 0
+                            ? 'Paid'
+                            : running > 0
+                            ? 'Partial'
+                            : 'Pending';
+                        return (
+                          <tr key={p.id} className="border-b border-border hover:bg-surface/50">
+                            <td className="px-4 py-3 text-muted text-xs">{i + 1}</td>
+                            <td className="px-4 py-3">{p.paymentType}</td>
+                            <td className="px-4 py-3">{formatDate(p.date)}</td>
+                            <td className="px-4 py-3 font-semibold text-brand">{formatCurrency(p.paid)}</td>
+                            <td className="px-4 py-3 font-semibold text-success">{formatCurrency(running)}</td>
+                            <td className="px-4 py-3 font-semibold text-danger">{formatCurrency(remaining)}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                                status === 'Paid'
+                                  ? 'bg-green-50 text-green-700 border-green-200'
+                                  : status === 'Partial'
+                                  ? 'bg-orange-50 text-orange-700 border-orange-200'
+                                  : 'bg-red-50 text-red-700 border-red-200'
+                              }`}>
+                                {status === 'Pending' ? 'Unpaid' : status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-muted">{p.remarks ?? '—'}</td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-surface border-t-2 border-border">
+                      <td colSpan={3} className="px-4 py-3 text-xs font-bold text-muted uppercase">Total</td>
+                      <td className="px-4 py-3 font-bold text-brand">{formatCurrency(alreadyPaid)}</td>
+                      <td colSpan={2} className="px-4 py-3 font-bold text-danger">
+                        {remainingAfterPrevious > 0 ? `${formatCurrency(remainingAfterPrevious)} due` : '✓ Fully Paid'}
+                      </td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+
+    </div>
+  );
+}
