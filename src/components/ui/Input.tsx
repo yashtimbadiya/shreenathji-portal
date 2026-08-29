@@ -505,3 +505,298 @@ export function SearchableSelect({
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SearchableMultiSelect  — like SearchableSelect but for multiple values
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SearchableMultiSelectProps {
+  label?: string;
+  values: string[];
+  options: SearchableSelectOption[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  error?: string;
+  tabIndex?: number;
+  /** When provided, renders an "＋ Add new…" row at the bottom of the dropdown */
+  onAddNew?: () => void;
+  addNewLabel?: string;
+  /** Custom render for a selected tag — receives option label */
+  renderTag?: (label: string, value: string, onRemove: () => void) => unknown;
+}
+
+export function SearchableMultiSelect({
+  label,
+  values,
+  options,
+  onChange,
+  placeholder = 'Search and select…',
+  disabled = false,
+  error,
+  tabIndex,
+  onAddNew,
+  addNewLabel = 'Add new…',
+}: SearchableMultiSelectProps) {
+  const [open,        setOpen]        = useState(false);
+  const [query,       setQuery]       = useState('');
+  const [highlighted, setHighlighted] = useState(0);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef   = useRef<HTMLButtonElement>(null);
+  const searchRef    = useRef<HTMLInputElement>(null);
+  const listRef      = useRef<HTMLUListElement>(null);
+
+  const selectedLabels = values
+    .map((v) => options.find((o) => o.value === v))
+    .filter(Boolean) as SearchableSelectOption[];
+
+  const filtered = query.trim()
+    ? options.filter((o) => o.label.toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  const openDropdown = useCallback(() => {
+    setOpen(true);
+    setHighlighted(0);
+    setTimeout(() => searchRef.current?.focus(), 10);
+  }, []);
+
+  const closeDropdown = useCallback((returnFocus = true) => {
+    setOpen(false);
+    setQuery('');
+    if (returnFocus) setTimeout(() => triggerRef.current?.focus(), 0);
+  }, []);
+
+  const toggleOption = useCallback(
+    (optValue: string) => {
+      if (values.includes(optValue)) {
+        onChange(values.filter((v) => v !== optValue));
+      } else {
+        onChange([...values, optValue]);
+      }
+    },
+    [values, onChange],
+  );
+
+  // Outside click
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, []);
+
+  // Scroll highlight into view
+  useEffect(() => {
+    const item = listRef.current?.children[highlighted] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: 'nearest' });
+  }, [highlighted]);
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      openDropdown();
+    }
+  };
+
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const totalRows = filtered.length + (onAddNew ? 1 : 0);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlighted((h) => Math.min(h + 1, totalRows - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlighted((h) => Math.max(h - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (onAddNew && highlighted === filtered.length) {
+        closeDropdown(false);
+        onAddNew();
+      } else if (filtered[highlighted]) {
+        toggleOption(filtered[highlighted].value);
+      }
+    } else if (e.key === 'Escape') {
+      closeDropdown(true);
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+      setQuery('');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1 relative" ref={containerRef}>
+      {label && <label className="text-sm font-medium text-charcoal">{label}</label>}
+
+      {/* Trigger */}
+      <button
+        ref={triggerRef}
+        type="button"
+        data-trigger
+        disabled={disabled}
+        tabIndex={tabIndex}
+        onClick={() => (open ? closeDropdown(false) : openDropdown())}
+        onKeyDown={onTriggerKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={[
+          'w-full min-h-[38px] flex items-center flex-wrap gap-1.5 rounded-lg border px-3 py-1.5 text-sm text-left transition-colors',
+          disabled
+            ? 'bg-surface text-muted cursor-not-allowed border-border'
+            : 'bg-white border-border hover:border-brand focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20',
+          open  ? 'border-brand ring-2 ring-brand/20' : '',
+          error ? 'border-red-400' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        {selectedLabels.length === 0 ? (
+          <span className="text-muted py-0.5">{placeholder}</span>
+        ) : (
+          selectedLabels.map((opt) => (
+            <span
+              key={opt.value}
+              className="inline-flex items-center gap-1 bg-brand/10 text-brand border border-brand/25 rounded-md px-2 py-0.5 text-xs font-medium"
+            >
+              {opt.label}
+              <span
+                role="button"
+                tabIndex={-1}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  onChange(values.filter((v) => v !== opt.value));
+                }}
+                className="text-brand/60 hover:text-red-500 ml-0.5"
+                aria-label={`Remove ${opt.label}`}
+              >
+                <X size={11} />
+              </span>
+            </span>
+          ))
+        )}
+        <span className="ml-auto shrink-0 pl-1">
+          <ChevronDown
+            size={14}
+            className={`text-muted transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          />
+        </span>
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-white shadow-2xl">
+          {/* Search row */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+            <Search size={13} className="text-muted shrink-0" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setHighlighted(0); }}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Type to search…"
+              autoComplete="off"
+              className="flex-1 text-sm outline-none bg-transparent text-charcoal placeholder:text-muted"
+            />
+            {query && (
+              <button
+                type="button"
+                tabIndex={-1}
+                onMouseDown={() => { setQuery(''); setHighlighted(0); searchRef.current?.focus(); }}
+              >
+                <X size={13} className="text-muted hover:text-red-500" />
+              </button>
+            )}
+          </div>
+
+          {/* Keyboard hint */}
+          <div className="px-3 py-1 text-[10px] text-muted border-b border-border/50 flex gap-3">
+            <span>↑↓ navigate</span>
+            <span>Enter toggle</span>
+            <span>Esc close</span>
+          </div>
+
+          {/* Options */}
+          <ul ref={listRef} role="listbox" aria-multiselectable="true" className="max-h-52 overflow-y-auto py-1">
+            {filtered.length === 0 && !onAddNew ? (
+              <li className="px-3 py-3 text-sm text-muted text-center">No results for "{query}"</li>
+            ) : (
+              <>
+                {filtered.length === 0 && (
+                  <li className="px-3 py-2 text-sm text-muted text-center">No results for "{query}"</li>
+                )}
+                {filtered.map((opt, i) => {
+                  const isSelected = values.includes(opt.value);
+                  return (
+                    <li
+                      key={opt.value}
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseDown={() => toggleOption(opt.value)}
+                      onMouseEnter={() => setHighlighted(i)}
+                      className={[
+                        'px-3 py-2 text-sm cursor-pointer select-none transition-colors flex items-center gap-2',
+                        i === highlighted
+                          ? 'bg-brand text-white'
+                          : 'text-charcoal hover:bg-surface',
+                      ].filter(Boolean).join(' ')}
+                    >
+                      {/* Checkbox indicator */}
+                      <span className={[
+                        'w-4 h-4 shrink-0 rounded border flex items-center justify-center text-[10px] font-bold transition-colors',
+                        isSelected
+                          ? (i === highlighted ? 'bg-white border-white text-brand' : 'bg-brand border-brand text-white')
+                          : (i === highlighted ? 'border-white/60' : 'border-border'),
+                      ].join(' ')}>
+                        {isSelected && '✓'}
+                      </span>
+                      {opt.label}
+                    </li>
+                  );
+                })}
+                {onAddNew && (
+                  <li
+                    role="option"
+                    aria-selected={false}
+                    onMouseDown={() => { closeDropdown(false); onAddNew(); }}
+                    onMouseEnter={() => setHighlighted(filtered.length)}
+                    className={[
+                      'px-3 py-2 text-sm cursor-pointer select-none transition-colors flex items-center gap-2 border-t border-border mt-1',
+                      highlighted === filtered.length
+                        ? 'bg-brand text-white'
+                        : 'text-brand hover:bg-brand/5 font-medium',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    <span className="text-base leading-none">＋</span>
+                    {addNewLabel}
+                  </li>
+                )}
+              </>
+            )}
+          </ul>
+
+          {/* Selection summary footer */}
+          {values.length > 0 && (
+            <div className="px-3 py-2 border-t border-border flex items-center justify-between">
+              <span className="text-xs text-brand font-medium">
+                {values.length} selected
+              </span>
+              <button
+                type="button"
+                tabIndex={-1}
+                onMouseDown={() => { onChange([]); searchRef.current?.focus(); }}
+                className="text-xs text-muted hover:text-red-500 transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && <span className="text-xs text-red-500">{error}</span>}
+    </div>
+  );
+}

@@ -21,6 +21,9 @@ export {
   saveSharedVariant,
   deleteReferenceRecord,
   deleteSharedVariantRecord,
+  deleteJobWorkRecord,
   createVendor,
   createReceipt,
+  deleteProductRecord,
+  deleteCategoryRecord,
 } from './supabaseClient';

@@ -269,7 +269,7 @@ export function ProductDetailPage() {
             <ActiveBadge active={product.status === 'Active'} />
           </div>
           <div className="flex flex-wrap gap-4 mt-2 text-sm text-muted">
-            <span>Category: <strong className="text-charcoal">{category?.name ?? '—'}</strong></span>
+            <span>Product: <strong className="text-charcoal">{category?.name ?? '—'}</strong></span>
             <span>Unit: <strong className="text-charcoal">{product.unit}</strong></span>
             <span>Code: <strong className="text-charcoal font-mono">{product.code}</strong></span>
             {product.rate !== undefined && (
@@ -283,7 +283,7 @@ export function ProductDetailPage() {
             variant="outline"
             onClick={() => navigate(`/products/${product.id}/edit`)}
           >
-            <Pencil size={14} /> Edit Product
+            <Pencil size={14} /> Edit Subproduct
           </Button>
           <button
             type="button"

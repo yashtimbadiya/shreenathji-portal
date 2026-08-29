@@ -1,9 +1,10 @@
-import { Plus, Search } from 'lucide-react';
+import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { PageHeader } from '../components/ui/Card';
+import { ConfirmDialog } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import {
   formatDate,
@@ -15,13 +16,22 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import type { JobStatus } from '../types';
 
+// Jobs in these statuses can be edited or deleted
+const EDITABLE_STATUSES: JobStatus[] = ['Draft', 'Sent'];
+
 export function JobWorksPage() {
-  const jobWorks = useAppStore((s) => s.jobWorks);
-  const vendors = useAppStore((s) => s.vendors);
-  const products = useAppStore((s) => s.products);
-  const [searchParams] = useSearchParams();
-  const statusFilter = searchParams.get('status') as JobStatus | null;
+  const navigate     = useNavigate();
+  const jobWorks     = useAppStore((s) => s.jobWorks);
+  const vendors      = useAppStore((s) => s.vendors);
+  const products     = useAppStore((s) => s.products);
+  const deleteJobWork = useAppStore((s) => s.deleteJobWork);
+
+  const [searchParams]  = useSearchParams();
+  const statusFilter    = searchParams.get('status') as JobStatus | null;
   const [search, setSearch] = useState('');
+
+  // Delete confirmation dialog state
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; jobNumber: string } | null>(null);
 
   const filtered = useMemo(() => {
     return jobWorks.filter((j) => {
@@ -63,17 +73,18 @@ export function JobWorksPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface sticky top-0">
-                {['Job Number', 'Vendor', 'Process', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Priority', 'Status'].map((h) => (
+                {['Job Number', 'Vendor', 'Process', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Priority', 'Status', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map((job) => {
-                const vendor = vendors.find((v) => v.id === job.vendorId);
-                const unit = products.find((p) => p.id === job.items[0]?.productId)?.unit ?? 'Pic';
+                const vendor    = vendors.find((v) => v.id === job.vendorId);
+                const unit      = products.find((p) => p.id === job.items[0]?.productId)?.unit ?? 'Pic';
+                const canEdit   = EDITABLE_STATUSES.includes(job.status);
                 return (
-                  <tr key={job.id} className="border-b border-border hover:bg-surface/50 cursor-pointer">
+                  <tr key={job.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-4 py-3">
                       <Link to={`/job-works/${job.id}`} className="font-medium text-brand hover:underline">{job.jobNumber}</Link>
                     </td>
@@ -90,6 +101,26 @@ export function JobWorksPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={job.status} /></td>
+                    <td className="px-4 py-3">
+                      {canEdit && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            title="Edit job work"
+                            onClick={() => navigate(`/job-works/${job.id}/edit`)}
+                            className="p-1.5 rounded-lg text-muted hover:text-brand hover:bg-brand/10 transition-colors"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            title="Delete job work"
+                            onClick={() => setDeleteTarget({ id: job.id, jobNumber: job.jobNumber })}
+                            className="p-1.5 rounded-lg text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -97,6 +128,19 @@ export function JobWorksPage() {
           </table>
         </div>
       </Card>
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteJobWork(deleteTarget.id);
+        }}
+        title="Delete Job Work"
+        message={`Are you sure you want to delete ${deleteTarget?.jobNumber ?? 'this job work'}? This action cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+      />
     </div>
   );
 }

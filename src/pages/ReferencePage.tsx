@@ -49,7 +49,7 @@ export function ReferencesPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface">
-                {['Reference No.', 'Products', 'Total Pieces', 'Remarks', 'Created', 'Status', ''].map((h) => (
+                {['Reference No.', 'Subproducts', 'Total Pieces', 'Weight (kg)', 'Remarks', 'Created', 'Status', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                 ))}
               </tr>
@@ -78,6 +78,11 @@ export function ReferencesPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">{totalPieces.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3 text-muted">
+                      {ref.weight != null
+                        ? <span className="font-medium text-charcoal">{ref.weight.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg</span>
+                        : '—'}
+                    </td>
                     <td className="px-4 py-3 text-muted">{ref.remarks ?? '—'}</td>
                     <td className="px-4 py-3 text-muted">{formatDate(ref.createdDate)}</td>
                     <td className="px-4 py-3">
@@ -107,7 +112,7 @@ export function ReferencesPage() {
               })}
               {references.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-muted">
                     No references yet. <Link to="/references/new" className="text-brand hover:underline">Add one</Link>.
                   </td>
                 </tr>
@@ -129,16 +134,17 @@ interface RefFormProps {
   initialRefNumber?: string;
   initialItems?: ReferenceItem[];
   initialRemarks?: string;
+  initialWeight?: number;
   takenRefNumbers: Set<string>;
   /** Called when the form is saved */
-  onSave: (data: { refNumber: string; items: ReferenceItem[]; remarks: string }) => void;
+  onSave: (data: { refNumber: string; items: ReferenceItem[]; remarks: string; weight?: number }) => void;
   onCancel: () => void;
   /** URL to redirect to for adding a new category (with ?returnTo= appended) */
   returnPath: string;
 }
 
 function ReferenceForm({
-  mode, initialRefNumber = '', initialItems = [], initialRemarks = '',
+  mode, initialRefNumber = '', initialItems = [], initialRemarks = '', initialWeight,
   takenRefNumbers, onSave, onCancel, returnPath,
 }: RefFormProps) {
   const navigate   = useNavigate();
@@ -147,6 +153,7 @@ function ReferenceForm({
 
   const [refNumber, setRefNumber] = useState(initialRefNumber);
   const [remarks,   setRemarks]   = useState(initialRemarks);
+  const [totalWeight, setTotalWeight] = useState(initialWeight != null ? String(initialWeight) : '');
   const [refError,  setRefError]  = useState('');
 
   const [draftCategoryId, setDraftCategoryId] = useState('');
@@ -177,7 +184,7 @@ function ReferenceForm({
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         if (canSave) {
-          onSave({ refNumber, items, remarks });
+          onSave({ refNumber, items, remarks, weight: totalWeight ? Number(totalWeight) : undefined });
         } else {
           saveBtnRef.current?.focus();
         }
@@ -185,7 +192,7 @@ function ReferenceForm({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canSave, refNumber, items, remarks, onSave]);
+  }, [canSave, refNumber, items, remarks, totalWeight, onSave]);
 
   const handleRefNumberChange = (value: string) => {
     setRefNumber(value);
@@ -213,7 +220,7 @@ function ReferenceForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
-    onSave({ refNumber, items, remarks });
+    onSave({ refNumber, items, remarks, weight: totalWeight ? Number(totalWeight) : undefined });
   };
 
   return (
@@ -224,7 +231,7 @@ function ReferenceForm({
         <span className="text-blue-500">·</span>
         <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> — next field</span>
         <span className="text-blue-500">·</span>
-        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on Pieces — Add Product &amp; cycle back to Category</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on Pieces — Add Subproduct &amp; cycle back to Product</span>
         <span className="text-blue-500">·</span>
         <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">↑↓</kbd> — navigate options</span>
         <span className="text-blue-500">·</span>
@@ -256,10 +263,37 @@ function ReferenceForm({
           />
         </div>
 
+        {/* ── Total weight for this reference ── */}
+        <div className="rounded-lg border border-border bg-surface/50 px-4 py-4">
+          <div className="flex items-start gap-4 flex-wrap">
+            <div className="flex-1 min-w-[180px] max-w-xs">
+              <Input
+                label="Total Weight (kg) — optional"
+                type="number"
+                min="0"
+                step="0.001"
+                value={totalWeight}
+                onChange={(e) => setTotalWeight(e.target.value)}
+                placeholder="e.g. 12.500"
+              />
+              <p className="text-xs text-muted mt-1">
+                Enter the total weight for this entire reference (not per subproduct).
+              </p>
+            </div>
+            {totalWeight && Number(totalWeight) > 0 && (
+              <div className="flex items-center gap-2 mt-6">
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-brand/10 border border-brand/20 px-3 py-1.5 text-sm font-semibold text-brand">
+                  ⚖ {Number(totalWeight).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* ── Committed product lines ── */}
         <div>
           <h4 className="text-sm font-semibold text-charcoal mb-3">
-            Products
+            Subproducts
             <span className="ml-2 text-xs font-normal text-muted">({items.length} added)</span>
           </h4>
 
@@ -268,7 +302,7 @@ function ReferenceForm({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-surface border-b border-border">
-                    {['#', 'Category', 'Product', 'Variant', 'Pieces', ''].map((h) => (
+                    {['#', 'Product', 'Subproduct', 'Variant', 'Pieces', ''].map((h) => (
                       <th key={h} className="text-left px-3 py-2.5 text-xs font-semibold text-muted uppercase">{h}</th>
                     ))}
                   </tr>
@@ -301,24 +335,24 @@ function ReferenceForm({
 
           {/* ── Draft add row ── */}
           <div className="rounded-lg border border-dashed border-border p-4 bg-surface/40">
-            <p className="text-xs font-semibold text-muted uppercase mb-3">Add Product</p>
+            <p className="text-xs font-semibold text-muted uppercase mb-3">Add Subproduct</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-              {/* Category with "+ Add new category" */}
+              {/* Product with "+ Add new product" */}
               <SearchableSelect
-                label="Category *"
+                label="Product *"
                 value={draftCategoryId}
                 onChange={(val) => { setDraftCategoryId(val); setDraftProductId(''); setDraftVariantId(''); }}
-                placeholder="Category…"
+                placeholder="Product…"
                 options={categories.filter((c) => c.status === 'Active').map((c) => ({ value: c.id, label: c.name }))}
                 onAddNew={() => navigate(`/categories/new?returnTo=${encodeURIComponent(returnPath)}`)}
-                addNewLabel="Add new category"
+                addNewLabel="Add new product"
                 triggerRef={draftCategoryTriggerRef}
               />
               <SearchableSelect
-                label="Product *"
+                label="Subproduct *"
                 value={draftProductId}
                 onChange={(val) => { setDraftProductId(val); setDraftVariantId(''); }}
-                placeholder={draftCategoryId ? 'Product…' : 'Select category first'}
+                placeholder={draftCategoryId ? 'Subproduct…' : 'Select product first'}
                 disabled={!draftCategoryId}
                 options={draftCategoryProducts.map((p) => ({ value: p.id, label: p.name }))}
                 onAddNew={
@@ -326,7 +360,7 @@ function ReferenceForm({
                     ? () => navigate(`/products/new?category=${encodeURIComponent(draftCategoryId)}&returnTo=${encodeURIComponent(returnPath)}`)
                     : undefined
                 }
-                addNewLabel={draftCategoryId ? 'Add new product' : 'Select category first'}
+                addNewLabel={draftCategoryId ? 'Add new subproduct' : 'Select product first'}
               />
               {draftVariants.length > 0 && (
                 <SearchableSelect
@@ -349,12 +383,12 @@ function ReferenceForm({
             </div>
             <Button type="button" variant="outline" disabled={!canAddItem} onClick={addDraftItem}>
               <Plus size={14} className="mr-1.5" />
-              Add Product
+              Add Subproduct
             </Button>
           </div>
 
           {items.length === 0 && (
-            <p className="text-xs text-orange-600 mt-2">Add at least one product line to save.</p>
+            <p className="text-xs text-orange-600 mt-2">Add at least one subproduct line to save.</p>
           )}
         </div>
 
@@ -400,7 +434,7 @@ export function AddReferencePage() {
   // category add page can come back here
   const selfPath = `/references/new${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
 
-  const handleSave = ({ refNumber, items, remarks }: { refNumber: string; items: ReferenceItem[]; remarks: string }) => {
+  const handleSave = ({ refNumber, items, remarks, weight }: { refNumber: string; items: ReferenceItem[]; remarks: string; weight?: number }) => {
     const first = items[0];
     addReference({
       referenceNumber: refNumber,
@@ -408,6 +442,7 @@ export function AddReferencePage() {
       productId:   first.productId,
       variantId:   first.variantId,
       pieces:      items.reduce((s, i) => s + i.pieces, 0),
+      weight:      weight,
       items,
       remarks: remarks || undefined,
       createdDate: new Date().toISOString().slice(0, 10),
@@ -479,13 +514,14 @@ export function EditReferencePage() {
 
   const initialItems = resolveItems(ref);
 
-  const handleSave = ({ items, remarks }: { refNumber: string; items: ReferenceItem[]; remarks: string }) => {
+  const handleSave = ({ items, remarks, weight }: { refNumber: string; items: ReferenceItem[]; remarks: string; weight?: number }) => {
     const first = items[0];
     updateReference(ref.id, {
       categoryId: first.categoryId,
       productId:  first.productId,
       variantId:  first.variantId,
       pieces:     items.reduce((s, i) => s + i.pieces, 0),
+      weight,
       items,
       remarks: remarks || undefined,
     });
@@ -501,6 +537,7 @@ export function EditReferencePage() {
           initialRefNumber={ref.referenceNumber}
           initialItems={initialItems}
           initialRemarks={ref.remarks ?? ''}
+          initialWeight={ref.weight}
           takenRefNumbers={takenRefNumbers}
           onSave={handleSave}
           onCancel={() => navigate(returnTo)}

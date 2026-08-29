@@ -4,7 +4,7 @@ import { AddCategoryPage, CategoriesPage } from './pages/CategoriesPage';
 import { ChallansPage, ChallanDetailPage } from './pages/ChallanPage';
 import { CreateJobWorkPage } from './pages/CreateJobWorkPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { JobWorkDetailPage } from './pages/JobWorkDetailPage';
+import { JobWorkDetailPage, EditJobWorkPage } from './pages/JobWorkDetailPage';
 import { JobWorksPage } from './pages/JobWorksPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
@@ -41,6 +41,7 @@ export default function App() {
         <Route path="job-works" element={<JobWorksPage />} />
         <Route path="job-works/create" element={<CreateJobWorkPage />} />
         <Route path="job-works/:id" element={<JobWorkDetailPage />} />
+        <Route path="job-works/:id/edit" element={<EditJobWorkPage />} />
         <Route path="challans" element={<ChallansPage />} />
         <Route path="challans/:id" element={<ChallanDetailPage />} />
         <Route path="payments" element={<PaymentsPage />} />

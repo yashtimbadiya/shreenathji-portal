@@ -57,8 +57,8 @@ const navItems: NavItem[] = [
     icon: <Boxes size={18} />,
     section: 'products',
     children: [
-      { label: 'Categories', path: '/categories' },
-      { label: 'Products', path: '/products' },
+      { label: 'Products', path: '/categories' },
+      { label: 'Subproducts', path: '/products' },
       { label: 'Shared Variants', path: '/shared-variants' },
       { label: 'References', path: '/references' },
     ],

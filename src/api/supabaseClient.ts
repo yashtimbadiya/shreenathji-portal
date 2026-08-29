@@ -191,3 +191,15 @@ export async function saveSharedVariant(sv: SharedVariant): Promise<void> {
 export async function deleteSharedVariantRecord(id: string): Promise<void> {
   await portalDb.sharedVariants.delete(id);
 }
+
+export async function deleteJobWorkRecord(id: string): Promise<void> {
+  await portalDb.jobWorks.delete(id);
+}
+
+export async function deleteProductRecord(id: string): Promise<void> {
+  await portalDb.products.delete(id);
+}
+
+export async function deleteCategoryRecord(id: string): Promise<void> {
+  await portalDb.categories.delete(id);
+}

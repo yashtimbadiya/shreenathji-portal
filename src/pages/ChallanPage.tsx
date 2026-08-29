@@ -75,6 +75,7 @@ export function ChallanDetailPage() {
       return {
         product,
         quantity: di.quantity,
+        weight: di.weight,
         rate,
         amount: di.quantity * rate,
       };
@@ -144,6 +145,7 @@ export function ChallanDetailPage() {
               <th className="text-left px-2 py-2 border border-border font-semibold">Product</th>
               <th className="text-left px-2 py-2 border border-border font-semibold">Category</th>
               <th className="text-right px-2 py-2 border border-border font-semibold">Pieces</th>
+              <th className="text-right px-2 py-2 border border-border font-semibold">Weight (kg)</th>
               <th className="text-right px-2 py-2 border border-border font-semibold">Rate</th>
               <th className="text-right px-2 py-2 border border-border font-semibold">Amount</th>
             </tr>
@@ -159,6 +161,9 @@ export function ChallanDetailPage() {
                   <td className="px-2 py-1.5 border border-border font-medium">{item!.product?.name ?? '—'}</td>
                   <td className="px-2 py-1.5 border border-border text-muted">{catName}</td>
                   <td className="px-2 py-1.5 border border-border text-right">{item!.quantity.toLocaleString()}</td>
+                  <td className="px-2 py-1.5 border border-border text-right">
+                    {item!.weight != null ? `${item!.weight} kg` : '—'}
+                  </td>
                   <td className="px-2 py-1.5 border border-border text-right">{formatCurrency(item!.rate ?? 0)}</td>
                   <td className="px-2 py-1.5 border border-border text-right font-semibold">{formatCurrency(item!.amount ?? 0)}</td>
                 </tr>
@@ -170,6 +175,11 @@ export function ChallanDetailPage() {
               <td colSpan={3} className="px-2 py-2 border border-border font-bold uppercase text-[10px] tracking-wide">Total</td>
               <td className="px-2 py-2 border border-border text-right font-bold">
                 {items.reduce((s, i) => s + (i?.quantity ?? 0), 0).toLocaleString()} Pic
+              </td>
+              <td className="px-2 py-2 border border-border text-right font-bold">
+                {items.some((i) => i?.weight != null)
+                  ? `${items.reduce((s, i) => s + (i?.weight ?? 0), 0).toFixed(3)} kg`
+                  : '—'}
               </td>
               <td className="px-2 py-2 border border-border" />
               <td className="px-2 py-2 border border-border text-right font-bold text-brand">{formatCurrency(totalAmount)}</td>

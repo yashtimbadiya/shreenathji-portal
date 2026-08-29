@@ -1,4 +1,4 @@
-import { Bell, Calendar, LogOut, Search, User, RefreshCw } from 'lucide-react';
+import { Bell, Calendar, LogOut, Plus, Search, User, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore';
@@ -137,6 +137,17 @@ export function Navbar() {
           <RefreshCw size={16} className={`text-muted ${isSyncing ? 'animate-spin' : ''}`} />
         </button>
       </div>
+
+      {/* New Job shortcut hint */}
+      <button
+        onClick={() => navigate('/job-works/create')}
+        title="Create New Job Card (Ctrl+Shift+N)"
+        className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-surface text-xs text-muted hover:border-brand hover:text-brand hover:bg-brand/5 transition-colors"
+      >
+        <Plus size={13} />
+        New Job
+        <kbd className="ml-1 font-mono text-[10px] bg-white border border-border px-1 py-0.5 rounded">Ctrl+⇧+N</kbd>
+      </button>
 
       <button className="relative p-2 rounded-lg hover:bg-surface text-muted">
         <Bell size={18} />

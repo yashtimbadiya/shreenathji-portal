@@ -22,6 +22,9 @@ import {
   saveSharedVariant,
   deleteReferenceRecord,
   deleteSharedVariantRecord,
+  deleteJobWorkRecord,
+  deleteProductRecord,
+  deleteCategoryRecord,
   createVendor as createVendorRecord,
   createReceipt as createReceiptRecord,
   saveVendor,
@@ -74,9 +77,11 @@ interface AppState {
 
   addCategory: (name: string) => void;
   updateCategory: (id: string, data: Partial<Category>) => void;
+  deleteCategory: (id: string) => void;
 
   addProduct: (product: Omit<Product, 'id' | 'variants'>) => void;
   updateProduct: (id: string, data: Partial<Product>) => void;
+  deleteProduct: (id: string) => void;
   addVariant: (productId: string, variant: Omit<ProductVariant, 'id' | 'productId'>) => void;
   updateVariant: (productId: string, variantId: string, data: Partial<Omit<ProductVariant, 'id' | 'productId'>>) => void;
   deleteVariant: (productId: string, variantId: string) => void;
@@ -89,6 +94,7 @@ interface AppState {
 
   createJobWork: (data: Omit<JobWork, 'id' | 'jobNumber' | 'createdAt' | 'status'> & { status?: JobWork['status'] }) => string;
   updateJobWork: (id: string, data: Partial<JobWork>) => void;
+  deleteJobWork: (id: string) => void;
 
   createDispatch: (data: Omit<DispatchRecord, 'id' | 'challanNumber'>) => string;
   createReceipt: (data: Omit<ReceiptRecord, 'id'>) => void;
@@ -271,6 +277,19 @@ export const useAppStore = create<AppState>()(
         if (updated) void saveCategory(updated);
       },
 
+      deleteCategory: (id) => {
+        const cat = get().categories.find((c) => c.id === id);
+        // also remove all products belonging to this category
+        const relatedProducts = get().products.filter((p) => p.categoryId === id);
+        set((s) => ({
+          categories: s.categories.filter((c) => c.id !== id),
+          products: s.products.filter((p) => p.categoryId !== id),
+        }));
+        void deleteCategoryRecord(id);
+        relatedProducts.forEach((p) => void deleteProductRecord(p.id));
+        get().addToast(`Product "${cat?.name ?? ''}" deleted`);
+      },
+
       addProduct: (product) => {
         const normalizedUnit = normalizeProductUnit(product);
         const p: Product = { ...product, unit: normalizedUnit, id: generateId('p'), variants: [] };
@@ -293,6 +312,20 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().products.find((p) => p.id === id);
         if (updated) void saveProduct(updated);
+      },
+
+      deleteProduct: (id) => {
+        const product = get().products.find((p) => p.id === id);
+        set((s) => ({
+          products: s.products.filter((p) => p.id !== id),
+          categories: s.categories.map((c) =>
+            c.id === product?.categoryId
+              ? { ...c, productCount: Math.max(0, c.productCount - 1) }
+              : c,
+          ),
+        }));
+        void deleteProductRecord(id);
+        get().addToast(`Subproduct "${product?.name ?? ''}" deleted`);
       },
 
       addVariant: (productId, variant) => {
@@ -470,6 +503,14 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().jobWorks.find((j) => j.id === id);
         if (updated) void saveJobWork(updated);
+      },
+
+      deleteJobWork: (id) => {
+        const job = get().jobWorks.find((j) => j.id === id);
+        set((s) => ({ jobWorks: s.jobWorks.filter((j) => j.id !== id) }));
+        void deleteJobWorkRecord(id);
+        get().addActivity('JobWork', id, `Job Work ${job?.jobNumber ?? id} deleted`);
+        get().addToast(`Job Work ${job?.jobNumber ?? ''} deleted`);
       },
 
       createDispatch: (data) => {

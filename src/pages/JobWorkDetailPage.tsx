@@ -1,9 +1,11 @@
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Pencil, Trash2 } from 'lucide-react';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
-import { Breadcrumb, Card, KPICard } from '../components/ui/Card';
-import { Input, Select, Textarea } from '../components/ui/Input';
+import { Breadcrumb, Card, KPICard, PageHeader } from '../components/ui/Card';
+import { Input, SearchableSelect, Select, Textarea } from '../components/ui/Input';
+import { ConfirmDialog } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import {
   formatCurrency,
@@ -21,6 +23,7 @@ const TABS = ['Overview', 'Items', 'Lifecycle', 'Payments', 'Activity'];
 
 export function JobWorkDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const jobWorks = useAppStore((s) => s.jobWorks);
   const dispatches = useAppStore((s) => s.dispatches);
   const receipts = useAppStore((s) => s.receipts);
@@ -29,7 +32,9 @@ export function JobWorkDetailPage() {
   const vendors = useAppStore((s) => s.vendors);
   const products = useAppStore((s) => s.products);
   const addPayment = useAppStore((s) => s.addPayment);
+  const deleteJobWork = useAppStore((s) => s.deleteJobWork);
   const [activeTab, setActiveTab] = useState('Overview');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     paymentType: 'Advance' as 'Advance' | 'Running' | 'Final' | 'Balance',
     paid: '',
@@ -93,6 +98,8 @@ export function JobWorkDetailPage() {
     });
   };
 
+  const canEdit = job.status === 'Draft' || job.status === 'Sent';
+
   return (
     <div>
       <div className="space-y-3 mb-6">
@@ -113,7 +120,22 @@ export function JobWorkDetailPage() {
             <span>Expected: <strong className="text-charcoal">{formatDate(job.expectedReturnDate)}</strong></span>
           </div>
         </div>
-
+        {canEdit && (
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/job-works/${job.id}/edit`)}
+            >
+              <Pencil size={14} /> Edit
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              <Trash2 size={14} /> Delete
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -255,8 +277,7 @@ export function JobWorkDetailPage() {
         </Card>
       )}
 
-      {activeTab === 'Payments' && (
-        <div className="space-y-4">
+      {activeTab === 'Payments' && (<div className="space-y-4">
           {/* ── Fully paid banner OR payment form ── */}
           {remainingAfterPrevious === 0 && jobTotalAmount > 0 ? (
             <Card className="p-6">
@@ -476,6 +497,198 @@ export function JobWorkDetailPage() {
       )}
 
 
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        open={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={() => {
+          deleteJobWork(job.id);
+          navigate('/job-works');
+        }}
+        title="Delete Job Work"
+        message={`Are you sure you want to delete ${job.jobNumber}? This action cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+      />
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit Job Work Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function EditJobWorkPage() {
+  const { id }       = useParams<{ id: string }>();
+  const navigate     = useNavigate();
+  const jobWorks     = useAppStore((s) => s.jobWorks);
+  const vendors      = useAppStore((s) => s.vendors);
+  const updateJobWork = useAppStore((s) => s.updateJobWork);
+
+  const job = jobWorks.find((j) => j.id === id);
+
+  // ── Local form state ──────────────────────────────────────────────────────
+  const [vendorId,      setVendorId]      = useState(job?.vendorId ?? '');
+  const [process,       setProcess]       = useState(job?.process ?? 'Printing');
+  const [issueDate,     setIssueDate]     = useState(job?.issueDate ?? '');
+  const [expectedDate,  setExpectedDate]  = useState(job?.expectedReturnDate ?? '');
+  const [priority,      setPriority]      = useState<'Normal' | 'High' | 'Urgent'>(job?.priority ?? 'Normal');
+  const [remarks,       setRemarks]       = useState(job?.remarks ?? '');
+
+  const submitRef = useRef<HTMLButtonElement>(null);
+  const canSave   = !!vendorId && !!expectedDate;
+
+  // Ctrl+Enter → save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (canSave) submitRef.current?.click();
+        else submitRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [canSave]);
+
+  if (!job) {
+    return (
+      <div className="text-center py-16 text-muted">
+        Job work not found.{' '}
+        <button onClick={() => navigate('/job-works')} className="text-brand hover:underline">Back to list</button>
+      </div>
+    );
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSave) return;
+    updateJobWork(job.id, {
+      vendorId,
+      process,
+      issueDate,
+      expectedReturnDate: expectedDate,
+      priority,
+      remarks: remarks || undefined,
+    });
+    navigate(`/job-works/${job.id}`);
+  };
+
+  return (
+    <div>
+      <Breadcrumb
+        items={[
+          { label: 'Job Work', path: '/job-works' },
+          { label: job.jobNumber, path: `/job-works/${job.id}` },
+          { label: 'Edit' },
+        ]}
+      />
+      <PageHeader
+        title={`Edit — ${job.jobNumber}`}
+        subtitle="Update job work header details. Line items are managed from the job detail page."
+      />
+
+      {/* Keyboard hint */}
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-700">
+        <span className="font-semibold">⌨ Keyboard</span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> — next field</span>
+        <span className="text-blue-500">·</span>
+        <span className="font-semibold text-blue-800">
+          <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> — Save Changes
+        </span>
+      </div>
+
+      <form onSubmit={handleSubmit} data-form>
+        <Card className="p-6 max-w-2xl">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Job number — read-only */}
+            <Input
+              label="Job Number"
+              value={job.jobNumber}
+              disabled
+              tabIndex={-1}
+            />
+
+            <SearchableSelect
+              label="Vendor *"
+              value={vendorId}
+              onChange={setVendorId}
+              placeholder="Search vendor…"
+              options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+              tabIndex={1}
+            />
+
+            <Select
+              label="Process"
+              value={process}
+              tabIndex={2}
+              onChange={(e) => setProcess(e.target.value)}
+              options={[
+                { value: 'Printing',   label: 'Printing'   },
+                { value: 'Packaging',  label: 'Packaging'  },
+              ]}
+            />
+
+            <Select
+              label="Priority"
+              value={priority}
+              tabIndex={3}
+              onChange={(e) => setPriority(e.target.value as 'Normal' | 'High' | 'Urgent')}
+              options={[
+                { value: 'Normal', label: 'Normal' },
+                { value: 'High',   label: 'High'   },
+                { value: 'Urgent', label: 'Urgent' },
+              ]}
+            />
+
+            <Input
+              label="Issue Date"
+              type="date"
+              value={issueDate}
+              tabIndex={4}
+              onChange={(e) => setIssueDate(e.target.value)}
+            />
+
+            <Input
+              label="Expected Return Date *"
+              type="date"
+              value={expectedDate}
+              tabIndex={5}
+              onChange={(e) => setExpectedDate(e.target.value)}
+              required
+            />
+
+            <div className="md:col-span-2">
+              <Textarea
+                label="Remarks"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Optional notes"
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-3">
+            <Button
+              ref={submitRef}
+              type="submit"
+              disabled={!canSave}
+            >
+              Save Changes
+              {canSave && (
+                <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate(`/job-works/${job.id}`)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      </form>
     </div>
   );
 }

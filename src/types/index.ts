@@ -96,6 +96,8 @@ export interface ReferenceRecord {
   productId: string;
   variantId?: string;
   pieces: number;
+  /** Total weight for the entire reference (kg) */
+  weight?: number;
   /** Multi-product line items (used when items.length > 0) */
   items?: ReferenceItem[];
   remarks?: string;
@@ -149,7 +151,7 @@ export interface DispatchRecord {
   driver: string;
   transport: string;
   remarks?: string;
-  items: { jobWorkItemId?: string; variantId: string; quantity: number }[];
+  items: { jobWorkItemId?: string; variantId: string; quantity: number; weight?: number }[];
   createdBy: string;
 }
 

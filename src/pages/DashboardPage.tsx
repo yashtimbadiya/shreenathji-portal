@@ -1,4 +1,4 @@
-import { Eye, Plus } from 'lucide-react';
+import { Eye, Pencil, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   Bar,
@@ -81,13 +81,19 @@ export function DashboardPage() {
     <div>
       <div className="flex items-center justify-between gap-3 mb-6">
         <h1 className="text-2xl font-bold text-charcoal">Dashboard</h1>
-        <Link
-          to="/job-works/create"
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
-        >
-          <Plus size={16} />
-          Create New Job Work
-        </Link>
+        <div className="flex items-center gap-3">
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-md bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs text-blue-700 font-medium">
+            <kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono text-[11px]">Shift+R</kbd>
+            New Job Card
+          </span>
+          <Link
+            to="/job-works/create"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+          >
+            <Plus size={16} />
+            Create New Job Work
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
@@ -104,7 +110,7 @@ export function DashboardPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface">
-                {['Job Number', 'Vendor', 'Product', 'Variant', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Status', ''].map((h) => (
+                {['Job Number', 'Vendor', 'Product', 'Variant', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Status', 'Actions'].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -128,9 +134,14 @@ export function DashboardPage() {
                     <td className="px-4 py-3">{formatDate(job.expectedReturnDate)}</td>
                     <td className="px-4 py-3"><StatusBadge status={job.status} /></td>
                     <td className="px-4 py-3">
-                      <Link to={`/job-works/${job.id}`} className="text-brand hover:underline">
-                        <Eye size={16} />
-                      </Link>
+                      <div className="flex items-center gap-3">
+                        <Link to={`/job-works/${job.id}`} className="text-muted hover:text-brand transition-colors" title="View">
+                          <Eye size={16} />
+                        </Link>
+                        <Link to={`/job-works/${job.id}/edit`} className="text-muted hover:text-brand transition-colors" title="Edit">
+                          <Pencil size={15} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );
