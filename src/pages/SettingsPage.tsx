@@ -9,7 +9,6 @@ import { exportToExcel, importFromExcel } from '../api/excelBackup';
 export function SettingsPage() {
   const settings          = useAppStore((s) => s.settings);
   const updateSettings    = useAppStore((s) => s.updateSettings);
-  const clearAllLocalData = useAppStore((s) => s.clearAllLocalData);
   const loadLocalData     = useAppStore((s) => s.loadLocalData);
   const connectionStatus  = useAppStore((s) => s.connectionStatus);
 
@@ -87,15 +86,6 @@ export function SettingsPage() {
     } else {
       setTimeout(() => { setImportStatus('idle'); setImportMessage(''); }, 6000);
     }
-  };
-
-  // ── Clear data ──────────────────────────────────────────────────────────────
-  const handleClearLocalData = async () => {
-    const confirmed = window.confirm(
-      'This will PERMANENTLY delete all local data.\n\nExport a backup first.\n\nContinue?',
-    );
-    if (!confirmed) return;
-    await clearAllLocalData();
   };
 
   const isOffline = connectionStatus === 'Offline';
@@ -231,7 +221,7 @@ export function SettingsPage() {
                 )}
               </button>
 
-              {/* Import result message */}
+              {/* ── Import result message */}
               {importMessage && (
                 <p className={`mt-2 flex items-center gap-1.5 text-xs ${
                   importStatus === 'done' ? 'text-green-600' : 'text-red-600'
@@ -255,22 +245,6 @@ export function SettingsPage() {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* ── Danger zone ── */}
-          <div className="mt-4 rounded-lg border border-red-100 bg-red-50/50 p-4">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-red-700">Clear All Local Data</p>
-                <p className="text-xs text-red-500 mt-0.5">
-                  Permanently removes all data from this browser. Export a backup first.
-                </p>
-              </div>
-              <Button type="button" variant="outline" onClick={handleClearLocalData}
-                className="shrink-0 border-red-200 text-red-600 hover:bg-red-50">
-                Clear Data
-              </Button>
             </div>
           </div>
         </Card>
