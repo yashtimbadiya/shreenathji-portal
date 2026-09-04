@@ -4,9 +4,11 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { Card, PageHeader } from '../components/ui/Card';
-import { Input, SearchableMultiSelect, SearchableSelect, Select } from '../components/ui/Input';
-import { ConfirmDialog } from '../components/ui/Modal';
+import { Input, SearchableSelect, Select } from '../components/ui/Input';
+import { BlockedDeleteDialog, ConfirmDialog } from '../components/ui/Modal';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Subproducts list page
@@ -15,11 +17,17 @@ export function ProductsPage() {
   const products = useAppStore((s) => s.products);
   const categories = useAppStore((s) => s.categories);
   const deleteProduct = useAppStore((s) => s.deleteProduct);
+  const checkConstraints = useAppStore((s) => s.checkProductDeleteConstraints);
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') ?? '');
   const [statusFilter, setStatusFilter] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [blockedTarget, setBlockedTarget] = useState<{ name: string; reasons: string[] } | null>(null);
+
+  // N → navigate to Add Subproduct page
+  useNewItemShortcut(() => navigate('/products/new'));
 
   const filtered = useMemo(() => {
     return products.filter((p) => {
@@ -109,7 +117,14 @@ export function ProductsPage() {
                         </Link>
                         <button
                           type="button"
-                          onClick={() => setDeleteTarget({ id: p.id, name: p.name })}
+                          onClick={() => {
+                            const reasons = checkConstraints(p.id);
+                            if (reasons.length > 0) {
+                              setBlockedTarget({ name: p.name, reasons });
+                            } else {
+                              setDeleteTarget({ id: p.id, name: p.name });
+                            }
+                          }}
                           className="text-xs text-muted hover:text-red-500 flex items-center gap-1 transition-colors"
                           title="Delete subproduct"
                         >
@@ -137,6 +152,13 @@ export function ProductsPage() {
         confirmLabel="Delete"
         danger
       />
+      <BlockedDeleteDialog
+        open={!!blockedTarget}
+        onClose={() => setBlockedTarget(null)}
+        title="Cannot Delete Subproduct"
+        entityName={blockedTarget?.name ?? ''}
+        reasons={blockedTarget?.reasons ?? []}
+      />
     </div>
   );
 }
@@ -148,7 +170,6 @@ export function AddProductPage() {
   const navigate       = useNavigate();
   const [searchParams] = useSearchParams();
   const categories     = useAppStore((s) => s.categories);
-  const sharedVariants = useAppStore((s) => s.sharedVariants);
   const addProduct     = useAppStore((s) => s.addProduct);
 
   const [name,       setName]       = useState('');
@@ -157,18 +178,17 @@ export function AddProductPage() {
   const [unit,       setUnit]       = useState('Pic');
   const [rate,       setRate]       = useState('');
 
-  // Shared variants to add at creation time
-  const [selectedSvIds, setSelectedSvIds] = useState<string[]>([]);
-
   const returnTo = searchParams.get('returnTo') ?? '/products';
 
   const submitRef = useRef<HTMLButtonElement>(null);
   const canSave   = !!name && !!categoryId;
 
-  const activeSharedVariants = useMemo(
-    () => sharedVariants.filter((sv) => sv.status === 'Active'),
-    [sharedVariants],
-  );
+  // Show which shared variants will be auto-inherited from the selected category
+  const selectedCategory = categories.find((c) => c.id === categoryId);
+  const inheritedSvCount = selectedCategory?.sharedVariantIds?.length ?? 0;
+
+  // ESC → cancel / go back
+  useEscapeBack(() => navigate(returnTo));
 
   // Ctrl+Enter → submit
   useEffect(() => {
@@ -187,48 +207,15 @@ export function AddProductPage() {
     e.preventDefault();
     if (!name || !categoryId) return;
 
-    // addProduct returns void; we need to grab the newly created product to add variants.
-    // Use a two-step approach: add product first, then let ProductDetailPage handle variants
-    // OR use the store's addVariant after creation. Here we do it via a callback pattern.
-    const productCode = code.trim();
-
-    // Build initial variants from selected shared variants
-    const initialVariants = activeSharedVariants
-      .filter((sv) => selectedSvIds.includes(sv.id))
-      .map((sv) => ({
-        name:         sv.name,
-        sku:          `${productCode}-${sv.sku}`,
-        attributes:   sv.attributes,
-        factoryStock: 0,
-        withVendor:   0,
-        rejected:     0,
-        status:       'Active' as const,
-      }));
-
+    // addProduct in the store auto-attaches the parent category's sharedVariantIds as variants
     addProduct({
       name: name.trim(),
       categoryId,
-      code: productCode,
+      code: code.trim(),
       unit,
       rate: rate ? Number(rate) : undefined,
       status: 'Active',
-      // Pass initial variants if supported; store will attach them
     });
-
-    // After creation, add the selected variants via the store
-    // We read the store snapshot after addProduct sets state
-    // The product is the most recently created one — use setTimeout to wait for state update
-    if (initialVariants.length > 0) {
-      setTimeout(() => {
-        const { products: storeProducts, addVariant } = useAppStore.getState();
-        const created = storeProducts.find(
-          (p) => p.name === name.trim() && p.categoryId === categoryId && p.code === productCode,
-        );
-        if (created) {
-          initialVariants.forEach((v) => addVariant(created.id, v));
-        }
-      }, 0);
-    }
 
     navigate(returnTo);
   };
@@ -251,128 +238,68 @@ export function AddProductPage() {
       </div>
 
       <form onSubmit={handleSubmit} data-form>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* ── Main fields ── */}
-          <div className="lg:col-span-2">
-            <Card className="p-6 space-y-4">
-              <h3 className="text-base font-semibold">Subproduct Details</h3>
-              <Input
-                label="Subproduct Name *"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                autoFocus
-              />
-              <SearchableSelect
-                label="Product *"
-                value={categoryId}
-                onChange={setCategoryId}
-                placeholder="Search product..."
-                options={categories.map((c) => ({ value: c.id, label: c.name }))}
-                onAddNew={() => navigate(`/categories/new?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}
-                addNewLabel="Add new product"
-              />
-              <Input
-                label="Subproduct Code — optional"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="MAR-ELA"
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <Select
-                  label="Unit"
-                  value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
-                  options={[
-                    { value: 'Pic',   label: 'Pic'   },
-                    { value: 'Piece', label: 'Piece' },
-                    { value: 'Kg',    label: 'Kg'    },
-                  ]}
-                />
-                <Input
-                  label="Rate (₹) — optional"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={rate}
-                  onChange={(e) => setRate(e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-            </Card>
+        <Card className="p-6 space-y-4 max-w-2xl">
+          <h3 className="text-base font-semibold">Subproduct Details</h3>
+          <Input
+            label="Subproduct Name *"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoFocus
+          />
+          <SearchableSelect
+            label="Product *"
+            value={categoryId}
+            onChange={setCategoryId}
+            placeholder="Search product..."
+            options={categories.map((c) => ({ value: c.id, label: c.name }))}
+            onAddNew={() => navigate(`/categories/new?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}
+            addNewLabel="Add new product"
+          />
+
+          {/* Inherited variants info banner */}
+          {categoryId && (
+            <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs ${
+              inheritedSvCount > 0
+                ? 'bg-green-50 border-green-200 text-green-700'
+                : 'bg-surface border-border text-muted'
+            }`}>
+              <Link2 size={13} className="shrink-0 mt-0.5" />
+              {inheritedSvCount > 0
+                ? <span><strong>{inheritedSvCount} shared variant{inheritedSvCount !== 1 ? 's' : ''}</strong> from "{selectedCategory?.name}" will be automatically added to this subproduct.</span>
+                : <span>The selected product has no inherited shared variants. You can add variants manually after saving.</span>
+              }
+            </div>
+          )}
+
+          <Input
+            label="Subproduct Code — optional"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="MAR-ELA"
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Unit"
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              options={[
+                { value: 'Pic',   label: 'Pic'   },
+                { value: 'Piece', label: 'Piece' },
+                { value: 'Kg',    label: 'Kg'    },
+              ]}
+            />
+            <Input
+              label="Rate (₹) — optional"
+              type="number"
+              min="0"
+              step="0.01"
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+              placeholder="0.00"
+            />
           </div>
-
-          {/* ── Shared Variants section ── */}
-          <div>
-            <Card className="p-6">
-              <div className="flex items-center gap-2 mb-3">
-                <Link2 size={15} className="text-brand shrink-0" />
-                <h3 className="text-base font-semibold">Add Variants</h3>
-              </div>
-              <p className="text-xs text-muted mb-4">
-                Search and select shared variants to attach to this subproduct at creation time. You can also add or manage variants later from the subproduct detail page.
-              </p>
-
-              {activeSharedVariants.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted">
-                  <p>No shared variants available.</p>
-                  <Link
-                    to="/shared-variants"
-                    className="text-brand hover:underline text-xs mt-1 inline-block"
-                  >
-                    Manage shared variant library →
-                  </Link>
-                </div>
-              ) : (
-                <SearchableMultiSelect
-                  label="Shared Variants"
-                  values={selectedSvIds}
-                  onChange={setSelectedSvIds}
-                  placeholder="Search variants…"
-                  options={activeSharedVariants.map((sv) => ({
-                    value: sv.id,
-                    label: sv.attributes.length > 0
-                      ? `${sv.name} (${sv.attributes.map((a) => `${a.key}: ${a.value}`).join(', ')})`
-                      : sv.name,
-                  }))}
-                  onAddNew={() => navigate(`/shared-variants`)}
-                  addNewLabel="Manage variant library"
-                />
-              )}
-
-              {/* Preview selected variant SKUs when code is filled */}
-              {selectedSvIds.length > 0 && code && (
-                <div className="mt-3 space-y-1">
-                  <p className="text-xs font-semibold text-muted uppercase tracking-wide">Generated SKUs</p>
-                  {selectedSvIds.map((svId) => {
-                    const sv = activeSharedVariants.find((s) => s.id === svId);
-                    if (!sv) return null;
-                    return (
-                      <p key={svId} className="text-xs text-brand font-mono bg-brand/5 border border-brand/15 rounded px-2 py-1">
-                        {code}-{sv.sku}
-                      </p>
-                    );
-                  })}
-                </div>
-              )}
-
-              {selectedSvIds.length > 0 && (
-                <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 mt-3">
-                  {selectedSvIds.length} variant{selectedSvIds.length !== 1 ? 's' : ''} will be added
-                </p>
-              )}
-
-              <div className="mt-3 pt-3 border-t border-border">
-                <Link
-                  to="/shared-variants"
-                  className="text-xs text-brand hover:underline flex items-center gap-1"
-                >
-                  <Link2 size={11} /> Manage shared variant library
-                </Link>
-              </div>
-            </Card>
-          </div>
-        </div>
+        </Card>
 
         {/* ── Actions ── */}
         <div className="mt-6 flex gap-3">
@@ -411,6 +338,9 @@ export function EditProductPage() {
 
   const submitRef = useRef<HTMLButtonElement>(null);
   const canSave   = !!name && !!categoryId && !!code;
+
+  // ESC → cancel / go back
+  useEscapeBack(() => navigate(product ? `/products/${product.id}` : '/products'));
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

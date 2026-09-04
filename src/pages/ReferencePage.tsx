@@ -4,9 +4,12 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
 import { Input, SearchableSelect, Textarea } from '../components/ui/Input';
+import { ConfirmDialog } from '../components/ui/Modal';
 import { useAppStore } from '../store/useAppStore';
 import { formatDate } from '../data/mockData';
 import type { ReferenceItem } from '../types';
+import { useEscapeBack } from '../hooks/useEscapeBack';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -30,12 +33,25 @@ export function ReferencesPage() {
   const products        = useAppStore((s) => s.products);
   const jobWorks        = useAppStore((s) => s.jobWorks);
   const deleteReference = useAppStore((s) => s.deleteReference);
+  const checkConstraints = useAppStore((s) => s.checkReferenceDeleteConstraints);
+  const navigate        = useNavigate();
+
+  // N → Add new reference
+  useNewItemShortcut(() => navigate('/references/new'));
 
   const usedReferenceNumbers = useMemo(() => {
     const set = new Set<string>();
     jobWorks.forEach((j) => { if (j.reference) set.add(j.reference.trim().toLowerCase()); });
     return set;
   }, [jobWorks]);
+
+  const [deleteTarget,  setDeleteTarget]  = useState<{ id: string; refNumber: string; cascadeWarnings: string[] } | null>(null);
+
+  const handleDeleteClick = (id: string, refNumber: string) => {
+    const reasons = checkConstraints(id);
+    // With cascade unlink behavior, always allow deletion — warn if job works will be unlinked
+    setDeleteTarget({ id, refNumber, cascadeWarnings: reasons });
+  };
 
   return (
     <div>
@@ -99,7 +115,7 @@ export function ReferencesPage() {
                           </Link>
                         )}
                         <button
-                          onClick={() => { if (confirm(`Delete reference "${ref.referenceNumber}"?`)) deleteReference(ref.id); }}
+                          onClick={() => handleDeleteClick(ref.id, ref.referenceNumber)}
                           className="text-muted hover:text-red-500 transition-colors"
                           title="Delete"
                         >
@@ -121,6 +137,20 @@ export function ReferencesPage() {
           </table>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => { if (deleteTarget) { deleteReference(deleteTarget.id); setDeleteTarget(null); } }}
+        title="Delete Reference"
+        message={
+          deleteTarget?.cascadeWarnings && deleteTarget.cascadeWarnings.length > 0
+            ? `Delete reference "${deleteTarget?.refNumber}"? The reference field will be cleared on the following linked job works:\n• ${deleteTarget.cascadeWarnings.join('\n• ')}`
+            : `Delete reference "${deleteTarget?.refNumber}"? This cannot be undone.`
+        }
+        confirmLabel="Delete"
+        danger
+      />
     </div>
   );
 }
@@ -177,6 +207,9 @@ function ReferenceForm({
 
   const canAddItem = !!draftCategoryId && !!draftProductId && !!draftPieces;
   const canSave    = !!refNumber && items.length > 0 && !refError;
+
+  // ESC → cancel (same as clicking the Cancel button)
+  useEscapeBack(onCancel);
 
   // ── Ctrl+Enter → save ──────────────────────────────────────────────────────
   useEffect(() => {
