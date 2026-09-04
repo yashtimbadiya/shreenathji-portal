@@ -385,9 +385,10 @@ export const useAppStore = create<AppState>()(
               const sv = allSVs.find((s) => s.id === svId);
               if (!sv) return;
               addVariant(created.id, {
-                name:         sv.name,
-                sku:          productCode ? `${productCode}-${sv.sku}` : sv.sku,
-                attributes:   sv.attributes,
+                name:            sv.name,
+                sku:             productCode ? `${productCode}-${sv.sku}` : sv.sku,
+                attributes:      sv.attributes,
+                sharedVariantId: sv.id,
                 factoryStock: 0,
                 withVendor:   0,
                 rejected:     0,
@@ -860,7 +861,55 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().sharedVariants.find((sv) => sv.id === id);
         if (updated) void saveSharedVariant(updated);
-        get().addToast('Shared variant updated');
+
+        // ── Cascade: propagate name / sku / attributes to all product variants
+        //    that were created from this shared variant (linked by sharedVariantId).
+        //    The variant's own SKU is prefixed with the product code, so we rebuild it.
+        const changedFields = Object.keys(data) as Array<keyof typeof data>;
+        const needsSync = changedFields.some((k) => ['name', 'sku', 'attributes'].includes(k));
+        if (needsSync && updated) {
+          const affectedProducts: Set<string> = new Set();
+          set((s) => ({
+            products: s.products.map((product) => {
+              const hasLinked = product.variants.some((v) => v.sharedVariantId === id);
+              if (!hasLinked) return product;
+              affectedProducts.add(product.id);
+              return {
+                ...product,
+                variants: product.variants.map((v) => {
+                  if (v.sharedVariantId !== id) return v;
+                  // Rebuild sku: keep the product-code prefix if present
+                  const existingPrefix = v.sku.includes('-') ? v.sku.split('-').slice(0, -1).join('-') : '';
+                  const newSku = data.sku !== undefined
+                    ? (existingPrefix ? `${existingPrefix}-${updated.sku}` : updated.sku)
+                    : v.sku;
+                  return {
+                    ...v,
+                    name:       data.name       !== undefined ? updated.name       : v.name,
+                    sku:        newSku,
+                    attributes: data.attributes !== undefined ? updated.attributes : v.attributes,
+                  };
+                }),
+              };
+            }),
+          }));
+          // Persist every affected product to IndexedDB
+          const finalProducts = get().products;
+          affectedProducts.forEach((pid) => {
+            const p = finalProducts.find((prod) => prod.id === pid);
+            if (p) void saveProduct(p);
+          });
+          if (affectedProducts.size > 0) {
+            get().addToast(
+              `Shared variant updated — synced across ${affectedProducts.size} subproduct${affectedProducts.size !== 1 ? 's' : ''}`,
+            );
+          } else {
+            get().addToast('Shared variant updated');
+          }
+        } else {
+          get().addToast('Shared variant updated');
+        }
+
         scheduleBackup();
       },
 

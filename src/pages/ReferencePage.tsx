@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
 import { Input, SearchableSelect, Textarea } from '../components/ui/Input';
-import { ConfirmDialog } from '../components/ui/Modal';
+import { BlockedDeleteDialog, ConfirmDialog } from '../components/ui/Modal';
 import { useAppStore } from '../store/useAppStore';
 import { formatDate } from '../data/mockData';
 import type { ReferenceItem } from '../types';
@@ -45,12 +45,18 @@ export function ReferencesPage() {
     return set;
   }, [jobWorks]);
 
-  const [deleteTarget,  setDeleteTarget]  = useState<{ id: string; refNumber: string; cascadeWarnings: string[] } | null>(null);
+  const [deleteTarget,  setDeleteTarget]  = useState<{ id: string; refNumber: string } | null>(null);
+  const [blockedTarget, setBlockedTarget] = useState<{ refNumber: string; reasons: string[] } | null>(null);
 
   const handleDeleteClick = (id: string, refNumber: string) => {
     const reasons = checkConstraints(id);
-    // With cascade unlink behavior, always allow deletion — warn if job works will be unlinked
-    setDeleteTarget({ id, refNumber, cascadeWarnings: reasons });
+    if (reasons.length > 0) {
+      // Reference is used in one or more job works — block deletion entirely
+      setBlockedTarget({ refNumber, reasons });
+    } else {
+      // Safe to delete
+      setDeleteTarget({ id, refNumber });
+    }
   };
 
   return (
@@ -143,13 +149,17 @@ export function ReferencesPage() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => { if (deleteTarget) { deleteReference(deleteTarget.id); setDeleteTarget(null); } }}
         title="Delete Reference"
-        message={
-          deleteTarget?.cascadeWarnings && deleteTarget.cascadeWarnings.length > 0
-            ? `Delete reference "${deleteTarget?.refNumber}"? The reference field will be cleared on the following linked job works:\n• ${deleteTarget.cascadeWarnings.join('\n• ')}`
-            : `Delete reference "${deleteTarget?.refNumber}"? This cannot be undone.`
-        }
+        message={`Delete reference "${deleteTarget?.refNumber}"? This cannot be undone.`}
         confirmLabel="Delete"
         danger
+      />
+
+      <BlockedDeleteDialog
+        open={blockedTarget !== null}
+        onClose={() => setBlockedTarget(null)}
+        title="Cannot Delete Reference"
+        entityName={blockedTarget?.refNumber ?? ''}
+        reasons={blockedTarget?.reasons ?? []}
       />
     </div>
   );

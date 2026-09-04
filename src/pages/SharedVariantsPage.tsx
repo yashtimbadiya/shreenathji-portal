@@ -5,99 +5,25 @@
  * Color: Red, Width: 25mm). These can be applied to any product instead of
  * typing the same attributes every time.
  */
-import { Pencil, Plus, Save, Trash2, X, Tags } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pencil, Plus, Save, Trash2, Tags } from 'lucide-react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { useAppStore } from '../store/useAppStore';
-import type { SharedVariant, VariantAttribute } from '../types';
+import type { SharedVariant } from '../types';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Inline attribute row editor
-// ─────────────────────────────────────────────────────────────────────────────
-interface AttrEditorProps {
-  attrs: VariantAttribute[];
-  onChange: (attrs: VariantAttribute[]) => void;
-}
-
-function AttributeEditor({ attrs, onChange }: AttrEditorProps) {
-  const add    = () => onChange([...attrs, { key: '', value: '' }]);
-  const remove = (i: number) => onChange(attrs.filter((_, idx) => idx !== i));
-  const update = (i: number, field: 'key' | 'value', val: string) =>
-    onChange(attrs.map((a, idx) => (idx === i ? { ...a, [field]: val } : a)));
-
-  return (
-    <div className="space-y-2">
-      {attrs.map((a, i) => (
-        <div key={i} className="attr-row flex items-center gap-2">
-          <input
-            className="flex-1 px-2.5 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand"
-            placeholder="Key (e.g. Size)"
-            value={a.key}
-            onChange={(e) => update(i, 'key', e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                // Move focus to the value field of the same row
-                const row = (e.target as HTMLElement).closest('.attr-row');
-                const valueInput = row?.querySelector<HTMLInputElement>('.attr-value');
-                valueInput?.focus();
-              }
-            }}
-          />
-          <span className="text-muted text-xs shrink-0">:</span>
-          <input
-            className="attr-value flex-1 px-2.5 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand"
-            placeholder="Value (e.g. M)"
-            value={a.value}
-            onChange={(e) => update(i, 'value', e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                // Move to the next row's key field, or add a new row
-                const allRows = document.querySelectorAll<HTMLInputElement>('.attr-row input:first-of-type');
-                const nextKey = allRows[i + 1];
-                if (nextKey) nextKey.focus();
-                else add();
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => remove(i)}
-            className="text-muted hover:text-red-500 transition-colors shrink-0"
-            tabIndex={-1}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={add}
-        className="flex items-center gap-1.5 text-xs text-brand hover:underline"
-      >
-        <Plus size={12} /> Add attribute
-      </button>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline form (used for both Add and Edit rows)
 // ─────────────────────────────────────────────────────────────────────────────
 interface FormState {
   name: string;
-  sku: string;
-  attributes: VariantAttribute[];
-  remarks: string;
 }
 
-const emptyForm: FormState = { name: '', sku: '', attributes: [{ key: 'Size', value: '' }], remarks: '' };
+const emptyForm: FormState = { name: '' };
 
 interface InlineFormProps {
   initial: FormState;
@@ -110,7 +36,7 @@ function InlineForm({ initial, onSave, onCancel, saveLabel = 'Save' }: InlineFor
   const [form, setForm] = useState<FormState>(initial);
   const saveBtnRef = useRef<HTMLButtonElement>(null);
 
-  const canSave = form.name.trim() !== '' && form.sku.trim() !== '';
+  const canSave = form.name.trim() !== '';
 
   // Ctrl+Enter → save
   useEffect(() => {
@@ -120,10 +46,14 @@ function InlineForm({ initial, onSave, onCancel, saveLabel = 'Save' }: InlineFor
         if (canSave) onSave(form);
         else saveBtnRef.current?.focus();
       }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canSave, form, onSave]);
+  }, [canSave, form, onSave, onCancel]);
 
   return (
     <div className="rounded-xl border-2 border-brand/30 bg-brand/5 p-4 space-y-3">
@@ -131,48 +61,22 @@ function InlineForm({ initial, onSave, onCancel, saveLabel = 'Save' }: InlineFor
       <div className="flex flex-wrap items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700">
         <span className="font-semibold">⌨ Keyboard Mode</span>
         <span className="text-blue-500">·</span>
-        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> — next field</span>
-        <span className="text-blue-500">·</span>
-        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on attr value — next row</span>
-        <span className="text-blue-500">·</span>
         <span className="font-semibold text-blue-800">
           <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> — {saveLabel}
         </span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Esc</kbd> — Cancel</span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" data-form>
+      <div className="max-w-sm">
         <Input
           label="Variant Name *"
           value={form.name}
-          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          onChange={(e) => setForm({ name: e.target.value })}
           placeholder="e.g. M, L, XXL, Red, 25mm"
           autoFocus
         />
-        <Input
-          label="SKU Suffix *"
-          value={form.sku}
-          onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
-          placeholder="e.g. M  →  product code + M"
-        />
       </div>
-
-      <div>
-        <label className="block text-sm font-medium text-charcoal mb-2">
-          Attributes
-          <span className="ml-1 text-xs font-normal text-muted">(Enter on value → next row)</span>
-        </label>
-        <AttributeEditor
-          attrs={form.attributes}
-          onChange={(attrs) => setForm((f) => ({ ...f, attributes: attrs }))}
-        />
-      </div>
-
-      <Input
-        label="Remarks"
-        value={form.remarks}
-        onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
-        placeholder="Optional notes"
-      />
 
       <div className="flex gap-2 pt-1">
         <button
@@ -214,12 +118,7 @@ export function SharedVariantsPage() {
   const filtered = useMemo(() => {
     if (!search.trim()) return sharedVariants;
     const q = search.toLowerCase();
-    return sharedVariants.filter(
-      (sv) =>
-        sv.name.toLowerCase().includes(q) ||
-        sv.sku.toLowerCase().includes(q) ||
-        sv.attributes.some((a) => a.value.toLowerCase().includes(q) || a.key.toLowerCase().includes(q)),
-    );
+    return sharedVariants.filter((sv) => sv.name.toLowerCase().includes(q));
   }, [sharedVariants, search]);
 
   // Count how many products use each shared variant (by matching variant id)
@@ -233,22 +132,22 @@ export function SharedVariantsPage() {
   }, [sharedVariants, products]);
 
   const handleAdd = (data: FormState) => {
+    const trimmedName = data.name.trim();
     addSharedVariant({
-      name: data.name.trim(),
-      sku: data.sku.trim(),
-      attributes: data.attributes.filter((a) => a.key && a.value),
+      name: trimmedName,
+      sku: trimmedName.toUpperCase().replace(/\s+/g, '-'),
+      attributes: [],
       status: 'Active',
-      remarks: data.remarks.trim() || undefined,
     });
     setShowAddForm(false);
   };
 
   const handleUpdate = (sv: SharedVariant, data: FormState) => {
+    const trimmedName = data.name.trim();
     updateSharedVariant(sv.id, {
-      name: data.name.trim(),
-      sku: data.sku.trim(),
-      attributes: data.attributes.filter((a) => a.key && a.value),
-      remarks: data.remarks.trim() || undefined,
+      name: trimmedName,
+      sku: trimmedName.toUpperCase().replace(/\s+/g, '-'),
+      attributes: [],
     });
     setEditingId(null);
   };
@@ -332,12 +231,7 @@ export function SharedVariantsPage() {
             return (
               <InlineForm
                 key={sv.id}
-                initial={{
-                  name: sv.name,
-                  sku: sv.sku,
-                  attributes: sv.attributes.length > 0 ? sv.attributes : [{ key: 'Size', value: '' }],
-                  remarks: sv.remarks ?? '',
-                }}
+                initial={{ name: sv.name }}
                 onSave={(data) => handleUpdate(sv, data)}
                 onCancel={() => setEditingId(null)}
                 saveLabel="Update Variant"
@@ -357,7 +251,6 @@ export function SharedVariantsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-base font-semibold text-charcoal">{sv.name}</span>
-                    <span className="font-mono text-xs text-muted bg-surface border border-border px-1.5 py-0.5 rounded">{sv.sku}</span>
                     <ActiveBadge active={sv.status === 'Active'} />
                     {uses > 0 && (
                       <span className="inline-flex items-center text-xs bg-brand/10 text-brand px-2 py-0.5 rounded-full">
@@ -365,26 +258,6 @@ export function SharedVariantsPage() {
                       </span>
                     )}
                   </div>
-
-                  {/* Attributes */}
-                  {sv.attributes.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {sv.attributes.map((a, i) => (
-                        <span
-                          key={i}
-                          className="inline-flex items-center gap-1 text-xs bg-surface border border-border rounded px-2 py-0.5 text-charcoal"
-                        >
-                          <span className="text-muted">{a.key}:</span>
-                          <span className="font-medium">{a.value}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Remarks */}
-                  {sv.remarks && (
-                    <p className="text-xs text-muted mt-1.5 italic">{sv.remarks}</p>
-                  )}
                 </div>
 
                 {/* Actions */}

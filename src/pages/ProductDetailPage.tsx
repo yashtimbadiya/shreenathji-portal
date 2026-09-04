@@ -21,9 +21,11 @@ interface VariantRowProps {
   onDelete: () => void;
   /** Pre-computed blocking reasons — if non-empty, delete is blocked */
   deleteBlockReasons: string[];
+  /** Name of the linked shared variant, if any */
+  linkedSharedVariantName?: string;
 }
 
-function VariantRow({ variant, unit, onSave, onDelete, deleteBlockReasons }: VariantRowProps) {
+function VariantRow({ variant, unit, onSave, onDelete, deleteBlockReasons, linkedSharedVariantName }: VariantRowProps) {
   const [editing,  setEditing]  = useState(false);
   const [name,     setName]     = useState(variant.name);
   const [sku,      setSku]      = useState(variant.sku);
@@ -121,11 +123,19 @@ function VariantRow({ variant, unit, onSave, onDelete, deleteBlockReasons }: Var
           </td>
         </tr>
         <tr>
-          <td colSpan={8} className="px-4 pb-1">
-            <p className="text-xs text-muted">
-              <kbd className="bg-surface border border-border px-1 rounded font-mono">Enter</kbd> save ·{' '}
-              <kbd className="bg-surface border border-border px-1 rounded font-mono">Esc</kbd> cancel
-            </p>
+          <td colSpan={8} className="px-4 pb-2">
+            <div className="flex items-center gap-4">
+              <p className="text-xs text-muted">
+                <kbd className="bg-surface border border-border px-1 rounded font-mono">Enter</kbd> save ·{' '}
+                <kbd className="bg-surface border border-border px-1 rounded font-mono">Esc</kbd> cancel
+              </p>
+              {linkedSharedVariantName && (
+                <p className="text-xs text-brand flex items-center gap-1">
+                  <Link2 size={10} />
+                  Linked to shared variant "{linkedSharedVariantName}" — name syncs automatically when the library is updated
+                </p>
+              )}
+            </div>
           </td>
         </tr>
       </>
@@ -135,7 +145,19 @@ function VariantRow({ variant, unit, onSave, onDelete, deleteBlockReasons }: Var
   return (
     <>
       <tr className="border-b border-border last:border-0 hover:bg-surface/50 group">
-        <td className="px-4 py-3 font-medium">{variant.name}</td>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{variant.name}</span>
+            {linkedSharedVariantName && (
+              <span
+                title={`Auto-syncs from shared variant "${linkedSharedVariantName}"`}
+                className="inline-flex items-center gap-1 text-[10px] font-semibold bg-brand/10 text-brand border border-brand/20 px-1.5 py-0.5 rounded-full cursor-default"
+              >
+                <Link2 size={9} /> synced
+              </span>
+            )}
+          </div>
+        </td>
         <td className="px-4 py-3 font-mono text-xs">{variant.sku}</td>
         <td className="px-4 py-3 text-xs text-muted">
           {variant.attributes.map((a) => `${a.key}: ${a.value}`).join(', ') || '—'}
@@ -237,9 +259,10 @@ export function ProductDetailPage() {
     if (mode === 'shared') {
       if (!selectedSv) return;
       addVariant(product.id, {
-        name:         selectedSv.name,
-        sku:          `${product.code}-${selectedSv.sku}`,
-        attributes:   selectedSv.attributes,
+        name:            selectedSv.name,
+        sku:             `${product.code}-${selectedSv.sku}`,
+        attributes:      selectedSv.attributes,
+        sharedVariantId: selectedSv.id,
         factoryStock: 0,
         withVendor:   0,
         rejected:     0,
@@ -350,6 +373,11 @@ export function ProductDetailPage() {
                   onSave={(data) => updateVariant(product.id, v.id, data)}
                   onDelete={() => deleteVariant(product.id, v.id)}
                   deleteBlockReasons={checkVariantDeleteConstraints(v.id)}
+                  linkedSharedVariantName={
+                    v.sharedVariantId
+                      ? sharedVariants.find((sv) => sv.id === v.sharedVariantId)?.name
+                      : undefined
+                  }
                 />
               ))}
             </tbody>

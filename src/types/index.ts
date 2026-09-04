@@ -70,6 +70,8 @@ export interface ProductVariant {
   withVendor: number;
   rejected: number;
   status: 'Active' | 'Disabled';
+  /** ID of the SharedVariant this was created from — enables name/sku sync on edit */
+  sharedVariantId?: string;
 }
 
 export interface Product {

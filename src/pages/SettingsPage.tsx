@@ -1,5 +1,9 @@
-import { useRef, useMemo, useState, useEffect } from 'react';
-import { Download, Upload, AlertTriangle, CheckCircle2, Wifi, WifiOff, FileSpreadsheet, FolderOpen, ShieldCheck, Clock } from 'lucide-react';
+import { useRef, useMemo, useState, useEffect, useCallback } from 'react';
+import {
+  Download, Upload, AlertTriangle, CheckCircle2, Wifi, WifiOff,
+  FileSpreadsheet, FolderOpen, ShieldCheck, Clock, History,
+  RefreshCw, Trash2, HardDrive,
+} from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, PageHeader } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
@@ -14,17 +18,37 @@ import {
   writeBackupToFolder,
   triggerDownloadBackup,
   getLastBackupTime,
+  loadBackupHistory,
+  clearBackupHistory,
+  type BackupHistoryEntry,
 } from '../api/autoBackup';
 
+// ─── Small helpers ────────────────────────────────────────────────────────────
+function fmtTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024)       return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 export function SettingsPage() {
-  const settings          = useAppStore((s) => s.settings);
-  const updateSettings    = useAppStore((s) => s.updateSettings);
-  const loadLocalData     = useAppStore((s) => s.loadLocalData);
-  const connectionStatus  = useAppStore((s) => s.connectionStatus);
+  const settings         = useAppStore((s) => s.settings);
+  const updateSettings   = useAppStore((s) => s.updateSettings);
+  const loadLocalData    = useAppStore((s) => s.loadLocalData);
+  const connectionStatus = useAppStore((s) => s.connectionStatus);
 
   const [formState, setFormState] = useState(settings);
   const [isDirty,   setIsDirty]   = useState(false);
 
+  // ── Export / Import ─────────────────────────────────────────────────────────
   const [exportStatus,  setExportStatus]  = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const [importStatus,  setImportStatus]  = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const [importMessage, setImportMessage] = useState('');
@@ -32,11 +56,20 @@ export function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Auto Backup state ───────────────────────────────────────────────────────
-  const [folderName,      setFolderName]      = useState<string | null>(null);
-  const [backupStatus,    setBackupStatus]    = useState<'idle' | 'working' | 'done' | 'error' | 'no-permission'>('idle');
-  const [lastBackupTime,  setLastBackupTimeState] = useState<string | null>(getLastBackupTime());
+  const [folderName,     setFolderName]     = useState<string | null>(null);
+  const [backupStatus,   setBackupStatus]   = useState<'idle' | 'working' | 'done' | 'error' | 'no-permission'>('idle');
+  const [lastBackupTime, setLastBackupTime] = useState<string | null>(getLastBackupTime());
+  const [history,        setHistory]        = useState<BackupHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Load saved folder name on mount
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    const h = await loadBackupHistory();
+    setHistory(h);
+    setHistoryLoading(false);
+  }, []);
+
+  // Load saved folder name + history on mount
   useEffect(() => {
     loadDirectoryHandle().then(async (handle) => {
       if (!handle) return;
@@ -44,7 +77,8 @@ export function SettingsPage() {
       setFolderName(ok ? handle.name : null);
       if (!ok) await clearDirectoryHandle();
     });
-  }, []);
+    void refreshHistory();
+  }, [refreshHistory]);
 
   const handleChooseFolder = async () => {
     if (!supportsFileSystemAccess) return;
@@ -71,18 +105,20 @@ export function SettingsPage() {
     try {
       const handle = await loadDirectoryHandle();
       if (handle) {
-        const ok = await writeBackupToFolder();
-        if (ok) {
-          setLastBackupTimeState(new Date().toISOString());
+        const filename = await writeBackupToFolder();
+        if (filename) {
+          setLastBackupTime(new Date().toISOString());
           setBackupStatus('done');
+          await refreshHistory();
         } else {
           setBackupStatus('no-permission');
         }
       } else {
-        // No folder — fall back to download
+        // No folder configured — fall back to browser download
         await triggerDownloadBackup();
-        setLastBackupTimeState(new Date().toISOString());
+        setLastBackupTime(new Date().toISOString());
         setBackupStatus('done');
+        await refreshHistory();
       }
     } catch {
       setBackupStatus('error');
@@ -90,14 +126,12 @@ export function SettingsPage() {
     setTimeout(() => setBackupStatus('idle'), 5000);
   };
 
-  const formatBackupTime = (iso: string | null) => {
-    if (!iso) return null;
-    return new Date(iso).toLocaleString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    });
+  const handleClearHistory = async () => {
+    await clearBackupHistory();
+    setHistory([]);
   };
 
+  // ── Field groups ────────────────────────────────────────────────────────────
   const fieldGroups = useMemo(() => [
     {
       title: 'Company Information',
@@ -159,7 +193,8 @@ export function SettingsPage() {
     if (result.ok) {
       setImportCounts(result.counts ?? null);
       await loadLocalData();
-      setTimeout(() => { setImportStatus('idle'); setImportMessage(''); setImportCounts(null); }, 6000);
+      // Short delay then reload so the Zustand store and all pages re-initialise cleanly
+      setTimeout(() => window.location.reload(), 1800);
     } else {
       setTimeout(() => { setImportStatus('idle'); setImportMessage(''); }, 6000);
     }
@@ -184,147 +219,10 @@ export function SettingsPage() {
             <span className="font-semibold">{connectionStatus}</span>
             {isOffline
               ? ' — App works fully offline. Export a backup regularly to keep a safe copy.'
-              : ' — Data is stored locally in IndexedDB. Export to Excel to create a portable backup.'
+              : ' — Data is stored locally in IndexedDB. Use Auto Backup to keep dated copies automatically.'
             }
           </span>
         </div>
-
-        {/* ── Backup & Restore ─────────────────────────────────────────────── */}
-        <Card className="p-6">
-          <div className="flex items-center gap-2 mb-1">
-            <FileSpreadsheet size={18} className="text-green-600" />
-            <h3 className="text-base font-semibold">Backup &amp; Restore</h3>
-          </div>
-          <p className="text-xs text-muted mb-5">
-            All data is stored in your browser's IndexedDB. Export to an Excel workbook to create
-            a portable backup you can open in Excel/Google Sheets and restore any time.
-            The workbook has one sheet per data type — Job Works, Vendors, Products, References, and more.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-            {/* ── Export card ── */}
-            <div className="rounded-lg border border-border p-4 flex flex-col">
-              <div className="flex items-start gap-3 mb-4 flex-1">
-                <div className="rounded-full bg-green-50 p-2 shrink-0">
-                  <Download size={16} className="text-green-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-charcoal">Export to Excel</p>
-                  <p className="text-xs text-muted mt-0.5">
-                    Downloads <code className="bg-surface px-1 rounded">.xlsx</code> with separate sheets for
-                    Job Works, Job Items, Vendors, Categories, Products, References, Dispatches, Receipts, and Payments.
-                    Opens directly in Microsoft Excel or Google Sheets.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={exportStatus === 'working'}
-                className={`w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
-                  ${exportStatus === 'working'
-                    ? 'border-border text-muted cursor-not-allowed'
-                    : exportStatus === 'done'
-                    ? 'border-green-300 bg-green-50 text-green-700'
-                    : exportStatus === 'error'
-                    ? 'border-red-300 bg-red-50 text-red-600'
-                    : 'border-green-300 text-green-700 hover:bg-green-50'
-                  }`}
-              >
-                {exportStatus === 'working' ? (
-                  <>
-                    <span className="animate-spin text-base">⏳</span>
-                    Generating Excel…
-                  </>
-                ) : exportStatus === 'done' ? (
-                  <><CheckCircle2 size={15} /> Downloaded</>
-                ) : exportStatus === 'error' ? (
-                  <><AlertTriangle size={15} /> Export failed — try again</>
-                ) : (
-                  <><FileSpreadsheet size={15} /> Export Backup (.xlsx)</>
-                )}
-              </button>
-              {exportStatus === 'done' && (
-                <p className="mt-2 text-xs text-green-600 text-center">
-                  Excel file saved to your Downloads folder.
-                </p>
-              )}
-            </div>
-
-            {/* ── Import card ── */}
-            <div className="rounded-lg border border-border p-4 flex flex-col">
-              <div className="flex items-start gap-3 mb-4 flex-1">
-                <div className="rounded-full bg-amber-50 p-2 shrink-0">
-                  <Upload size={16} className="text-amber-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-charcoal">Import from Excel</p>
-                  <p className="text-xs text-muted mt-0.5">
-                    Pick a previously exported <code className="bg-surface px-1 rounded">.xlsx</code> backup.
-                    Records with the same ID are updated; new records are added. Existing data is not deleted.
-                  </p>
-                </div>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="hidden"
-                onChange={handleImportFile}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={importStatus === 'working'}
-                className={`w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
-                  ${importStatus === 'working'
-                    ? 'border-border text-muted cursor-not-allowed'
-                    : importStatus === 'done'
-                    ? 'border-green-300 bg-green-50 text-green-700'
-                    : importStatus === 'error'
-                    ? 'border-red-300 bg-red-50 text-red-600'
-                    : 'border-amber-300 text-amber-700 hover:bg-amber-50'
-                  }`}
-              >
-                {importStatus === 'working' ? (
-                  <><span className="animate-spin text-base">⏳</span> Importing…</>
-                ) : importStatus === 'done' ? (
-                  <><CheckCircle2 size={15} /> Imported successfully</>
-                ) : importStatus === 'error' ? (
-                  <><AlertTriangle size={15} /> Import failed</>
-                ) : (
-                  <><Upload size={15} /> Choose Excel File (.xlsx)</>
-                )}
-              </button>
-
-              {/* ── Import result message */}
-              {importMessage && (
-                <p className={`mt-2 flex items-center gap-1.5 text-xs ${
-                  importStatus === 'done' ? 'text-green-600' : 'text-red-600'
-                }`}>
-                  {importStatus === 'done' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-                  {importMessage}
-                </p>
-              )}
-
-              {/* Import counts breakdown */}
-              {importCounts && (
-                <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-3">
-                  <p className="text-xs font-semibold text-green-700 mb-2">Restored records:</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                    {Object.entries(importCounts).map(([label, count]) => (
-                      <div key={label} className="flex justify-between text-xs text-green-700">
-                        <span>{label}</span>
-                        <span className="font-semibold">{count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
 
         {/* ── Auto Backup ──────────────────────────────────────────────────── */}
         <Card className="p-6">
@@ -333,19 +231,19 @@ export function SettingsPage() {
             <h3 className="text-base font-semibold">Auto Backup</h3>
           </div>
           <p className="text-xs text-muted mb-5">
-            Choose a folder on your computer. The app will automatically save an Excel backup to that folder
-            when you close the tab and once per day on first load — no manual action needed.
+            Point the app to a folder on your computer. Every backup is saved as a new dated file —
+            older ones are never overwritten, giving you a full history (up to 30 files).
+            Backups run automatically when you close the tab and once per day on load.
             {!supportsFileSystemAccess && (
               <span className="block mt-1 text-orange-600 font-medium">
-                ⚠ Your browser doesn't support folder access (requires Chrome or Edge 86+).
-                Use "Backup Now" below to download a manual copy instead.
+                ⚠ Folder access requires Chrome or Edge 86+. Use "Download Backup" to save manually.
               </span>
             )}
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 
-            {/* ── Folder picker card ── */}
+            {/* Folder picker */}
             <div className="rounded-lg border border-border p-4 flex flex-col gap-3">
               <div className="flex items-start gap-3">
                 <div className="rounded-full bg-brand/10 p-2 shrink-0">
@@ -362,16 +260,15 @@ export function SettingsPage() {
                   )}
                 </div>
               </div>
-
-              <div className="flex gap-2 mt-auto">
+              <div className="flex gap-2 mt-auto flex-wrap">
                 {supportsFileSystemAccess && (
                   <button
                     type="button"
                     onClick={handleChooseFolder}
-                    className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-brand/40 bg-brand/5 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10 transition-colors"
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-brand/40 bg-brand/5 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10 transition-colors"
                   >
                     <FolderOpen size={14} />
-                    {folderName ? 'Change Folder' : 'Choose Folder'}
+                    {folderName ? 'Change' : 'Choose Folder'}
                   </button>
                 )}
                 {folderName && (
@@ -379,6 +276,7 @@ export function SettingsPage() {
                     type="button"
                     onClick={handleRemoveFolder}
                     className="px-3 py-2 rounded-lg border border-border text-xs text-muted hover:text-red-600 hover:border-red-200 transition-colors"
+                    title="Remove folder"
                   >
                     Remove
                   </button>
@@ -386,7 +284,7 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {/* ── Status + manual trigger ── */}
+            {/* Last backup + manual trigger */}
             <div className="rounded-lg border border-border p-4 flex flex-col gap-3">
               <div className="flex items-start gap-3">
                 <div className="rounded-full bg-surface p-2 shrink-0 border border-border">
@@ -395,9 +293,7 @@ export function SettingsPage() {
                 <div>
                   <p className="text-sm font-semibold text-charcoal">Last Backup</p>
                   <p className="text-xs text-muted mt-0.5">
-                    {lastBackupTime
-                      ? formatBackupTime(lastBackupTime)
-                      : 'No backup recorded yet'}
+                    {lastBackupTime ? fmtTime(lastBackupTime) : 'No backup yet'}
                   </p>
                 </div>
               </div>
@@ -417,7 +313,7 @@ export function SettingsPage() {
                   }`}
               >
                 {backupStatus === 'working' ? (
-                  <><span className="animate-spin text-base">⏳</span> Backing up…</>
+                  <><RefreshCw size={15} className="animate-spin" /> Backing up…</>
                 ) : backupStatus === 'done' ? (
                   <><CheckCircle2 size={15} /> Backup saved!</>
                 ) : backupStatus === 'no-permission' ? (
@@ -425,25 +321,216 @@ export function SettingsPage() {
                 ) : backupStatus === 'error' ? (
                   <><AlertTriangle size={15} /> Backup failed — try again</>
                 ) : (
-                  <><Download size={15} /> {folderName ? 'Backup Now' : 'Download Backup'}</>
+                  <><HardDrive size={15} /> {folderName ? 'Backup Now' : 'Download Backup'}</>
                 )}
               </button>
             </div>
+
+            {/* How it works */}
+            <div className="rounded-lg bg-surface border border-border px-4 py-3 text-xs text-muted space-y-1.5">
+              <p className="font-semibold text-charcoal text-xs">How it works</p>
+              <p>📁 Each backup = a new dated file — old ones are never overwritten.</p>
+              <p>🔄 Auto-runs when you <strong>close the tab</strong> and once <strong>daily on load</strong>.</p>
+              <p>⚡ Also runs <strong>10 s after any data change</strong> (if folder is set and permission is active).</p>
+              <p>🗂 Up to <strong>30 files</strong> are kept; the oldest are deleted automatically.</p>
+              {!supportsFileSystemAccess && (
+                <p className="text-orange-600 font-medium">⚠ Folder backup needs Chrome/Edge 86+.</p>
+              )}
+            </div>
           </div>
 
-          {/* How it works */}
-          <div className="mt-4 rounded-lg bg-surface border border-border px-4 py-3 text-xs text-muted space-y-1">
-            <p className="font-semibold text-charcoal text-xs">How auto backup works:</p>
-            <p>• <strong>On close</strong> — when you close the tab or browser, a backup is written automatically to your chosen folder.</p>
-            <p>• <strong>Daily</strong> — the first time you open the app each day, a backup is created.</p>
-            <p>• <strong>File names</strong> — each backup is saved as <code className="bg-white border border-border px-1 rounded">snj-backup-YYYY-MM-DD_HH-MM.xlsx</code> so old backups are never overwritten.</p>
-            {!supportsFileSystemAccess && (
-              <p className="text-orange-600 font-medium">• Folder-based backup requires Chrome or Edge. Use "Download Backup" to save manually.</p>
+          {/* ── Backup History ── */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-surface border-b border-border">
+              <div className="flex items-center gap-2 text-sm font-semibold text-charcoal">
+                <History size={15} className="text-muted" />
+                Backup History
+                {history.length > 0 && (
+                  <span className="text-xs font-normal text-muted">({history.length} file{history.length !== 1 ? 's' : ''})</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={refreshHistory}
+                  className="p-1.5 rounded text-muted hover:text-brand hover:bg-brand/5 transition-colors"
+                  title="Refresh history"
+                >
+                  <RefreshCw size={13} className={historyLoading ? 'animate-spin' : ''} />
+                </button>
+                {history.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearHistory}
+                    className="p-1.5 rounded text-muted hover:text-red-500 hover:bg-red-50 transition-colors"
+                    title="Clear history log"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {history.length === 0 ? (
+              <div className="px-4 py-6 text-center text-xs text-muted">
+                {historyLoading ? 'Loading…' : 'No backups recorded yet. Click "Backup Now" to create one.'}
+              </div>
+            ) : (
+              <div className="divide-y divide-border max-h-64 overflow-y-auto">
+                {history.map((entry) => (
+                  <div key={entry.filename} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface/60 transition-colors">
+                    <FileSpreadsheet size={14} className="text-green-600 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-mono text-charcoal truncate" title={entry.filename}>
+                        {entry.filename}
+                      </p>
+                      <p className="text-xs text-muted">
+                        {fmtTime(entry.timestamp)}
+                        <span className="mx-1.5">·</span>
+                        {entry.recordCount.toLocaleString('en-IN')} records
+                        <span className="mx-1.5">·</span>
+                        {fmtBytes(entry.sizeBytes)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </Card>
 
-        {/* ── Company & Numbering settings ──────────────────────────────────── */}        {fieldGroups.map((group) => (
+        {/* ── Backup & Restore ─────────────────────────────────────────────── */}
+        <Card className="p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <FileSpreadsheet size={18} className="text-green-600" />
+            <h3 className="text-base font-semibold">Manual Export &amp; Restore</h3>
+          </div>
+          <p className="text-xs text-muted mb-5">
+            Export a full backup as an Excel workbook you can open in Excel/Google Sheets.
+            To restore, import any previously exported <code className="bg-surface px-1 rounded">.xlsx</code> file —
+            records are upserted (matched by ID) and the page reloads automatically.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Export */}
+            <div className="rounded-lg border border-border p-4 flex flex-col">
+              <div className="flex items-start gap-3 mb-4 flex-1">
+                <div className="rounded-full bg-green-50 p-2 shrink-0">
+                  <Download size={16} className="text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Export to Excel</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Downloads a <code className="bg-surface px-1 rounded">.xlsx</code> with one sheet per data type —
+                    Job Works, Items, Vendors, Categories, Products, References, Dispatches, Receipts, Payments.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={exportStatus === 'working'}
+                className={`w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
+                  ${exportStatus === 'working'
+                    ? 'border-border text-muted cursor-not-allowed'
+                    : exportStatus === 'done'
+                    ? 'border-green-300 bg-green-50 text-green-700'
+                    : exportStatus === 'error'
+                    ? 'border-red-300 bg-red-50 text-red-600'
+                    : 'border-green-300 text-green-700 hover:bg-green-50'
+                  }`}
+              >
+                {exportStatus === 'working' ? (
+                  <><RefreshCw size={14} className="animate-spin" /> Generating…</>
+                ) : exportStatus === 'done' ? (
+                  <><CheckCircle2 size={15} /> Downloaded</>
+                ) : exportStatus === 'error' ? (
+                  <><AlertTriangle size={15} /> Export failed — try again</>
+                ) : (
+                  <><FileSpreadsheet size={15} /> Export Backup (.xlsx)</>
+                )}
+              </button>
+              {exportStatus === 'done' && (
+                <p className="mt-2 text-xs text-green-600 text-center">Saved to your Downloads folder.</p>
+              )}
+            </div>
+
+            {/* Import / Restore */}
+            <div className="rounded-lg border border-border p-4 flex flex-col">
+              <div className="flex items-start gap-3 mb-4 flex-1">
+                <div className="rounded-full bg-amber-50 p-2 shrink-0">
+                  <Upload size={16} className="text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Restore from Backup</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Pick any <code className="bg-surface px-1 rounded">.xlsx</code> backup file.
+                    Records are matched by ID and upserted — existing data that isn't in the file is kept intact.
+                    The app reloads automatically after a successful restore.
+                  </p>
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importStatus === 'working' || importStatus === 'done'}
+                className={`w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
+                  ${importStatus === 'working'
+                    ? 'border-border text-muted cursor-not-allowed'
+                    : importStatus === 'done'
+                    ? 'border-green-300 bg-green-50 text-green-700 cursor-not-allowed'
+                    : importStatus === 'error'
+                    ? 'border-red-300 bg-red-50 text-red-600'
+                    : 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                  }`}
+              >
+                {importStatus === 'working' ? (
+                  <><RefreshCw size={14} className="animate-spin" /> Importing…</>
+                ) : importStatus === 'done' ? (
+                  <><CheckCircle2 size={15} /> Restored — reloading…</>
+                ) : importStatus === 'error' ? (
+                  <><AlertTriangle size={15} /> Import failed</>
+                ) : (
+                  <><Upload size={15} /> Choose Backup File (.xlsx)</>
+                )}
+              </button>
+
+              {importMessage && (
+                <p className={`mt-2 flex items-center gap-1.5 text-xs ${
+                  importStatus === 'done' ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {importStatus === 'done' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                  {importMessage}
+                </p>
+              )}
+
+              {importCounts && (
+                <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-3">
+                  <p className="text-xs font-semibold text-green-700 mb-2">Restored records:</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    {Object.entries(importCounts).map(([label, count]) => (
+                      <div key={label} className="flex justify-between text-xs text-green-700">
+                        <span>{label}</span>
+                        <span className="font-semibold">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* ── Company & Numbering settings ──────────────────────────────────── */}
+        {fieldGroups.map((group) => (
           <Card key={group.title} className="p-6">
             <CardHeader title={group.title} />
             <div className="grid gap-4 md:grid-cols-2 mt-4">

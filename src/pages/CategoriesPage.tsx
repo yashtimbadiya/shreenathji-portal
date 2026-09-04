@@ -1,5 +1,5 @@
-import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useEscapeBack } from '../hooks/useEscapeBack';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
@@ -15,118 +15,14 @@ import type { Category } from '../types';
 // ─── Inline-editable row ──────────────────────────────────────────────────────
 interface CategoryRowProps {
   category: Category;
-  onSave: (name: string, status: 'Active' | 'Disabled') => void;
   onDelete: () => void;
   /** Pre-computed blocking reasons — if non-empty, delete is blocked */
   deleteBlockReasons: string[];
 }
 
-function CategoryRow({ category, onSave, onDelete, deleteBlockReasons }: CategoryRowProps) {
-  const [editing,       setEditing]       = useState(false);
-  const [name,          setName]          = useState(category.name);
-  const [status,        setStatus]        = useState<'Active' | 'Disabled'>(category.status);
+function CategoryRow({ category, onDelete, deleteBlockReasons }: CategoryRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blockedDelete, setBlockedDelete] = useState(false);
-
-  const handleSave = () => {
-    if (!name.trim()) return;
-    onSave(name.trim(), status);
-    setEditing(false);
-  };
-
-  const handleCancel = () => {
-    setName(category.name);
-    setStatus(category.status);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <>
-        <tr className="border-b border-border bg-brand/5">
-          {/* Name input */}
-          <td className="px-4 py-2.5">
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
-                if (e.key === 'Escape') handleCancel();
-              }}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-brand/40 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
-            />
-          </td>
-          {/* Subproduct count — read-only */}
-          <td className="px-4 py-2.5 text-muted">{category.productCount}</td>
-          {/* Status toggle */}
-          <td className="px-4 py-2.5">
-            <button
-              type="button"
-              onClick={() => setStatus((s) => s === 'Active' ? 'Disabled' : 'Active')}
-              className={`px-2.5 py-0.5 rounded-full border text-xs font-semibold transition-colors ${
-                status === 'Active'
-                  ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
-                  : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
-              }`}
-            >
-              {status}
-            </button>
-          </td>
-          {/* Created date — read-only */}
-          <td className="px-4 py-2.5 text-muted">{formatDate(category.createdDate)}</td>
-          {/* Save / Cancel */}
-          <td className="px-4 py-2.5">
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!name.trim()}
-                className="p-1.5 rounded-lg bg-brand text-white hover:bg-brand/90 disabled:opacity-50 transition-colors"
-                title="Save (Enter)"
-              >
-                <Check size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="p-1.5 rounded-lg text-muted hover:bg-surface border border-border transition-colors"
-                title="Cancel (Esc)"
-              >
-                <X size={13} />
-              </button>
-            </div>
-          </td>
-        </tr>
-        {/* Keyboard hint row */}
-        <tr className="bg-brand/5">
-          <td colSpan={5} className="px-4 pb-1.5">
-            <p className="text-xs text-muted">
-              <kbd className="bg-surface border border-border px-1 rounded font-mono">Enter</kbd> save ·{' '}
-              <kbd className="bg-surface border border-border px-1 rounded font-mono">Esc</kbd> cancel
-            </p>
-          </td>
-        </tr>
-
-        <ConfirmDialog
-          open={confirmDelete}
-          onClose={() => setConfirmDelete(false)}
-          onConfirm={() => { setConfirmDelete(false); onDelete(); }}
-          title="Delete Product"
-          message={`Delete "${category.name}"? This will also remove all its subproducts and cannot be undone.`}
-          confirmLabel="Delete"
-          danger
-        />
-        <BlockedDeleteDialog
-          open={blockedDelete}
-          onClose={() => setBlockedDelete(false)}
-          title="Cannot Delete Product"
-          entityName={category.name}
-          reasons={deleteBlockReasons}
-        />
-      </>
-    );
-  }
 
   return (
     <>
@@ -143,14 +39,12 @@ function CategoryRow({ category, onSave, onDelete, deleteBlockReasons }: Categor
             >
               View Subproducts
             </Link>
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
+            <Link
+              to={`/categories/${category.id}/edit`}
               className="flex items-center gap-1 text-xs text-muted hover:text-brand transition-colors opacity-0 group-hover:opacity-100"
-              title="Edit product"
             >
               <Pencil size={12} /> Edit
-            </button>
+            </Link>
             <button
               type="button"
               onClick={() => deleteBlockReasons.length > 0 ? setBlockedDelete(true) : setConfirmDelete(true)}
@@ -186,7 +80,6 @@ function CategoryRow({ category, onSave, onDelete, deleteBlockReasons }: Categor
 // ─── Products (Categories) list page ─────────────────────────────────────────
 export function CategoriesPage() {
   const categories     = useAppStore((s) => s.categories);
-  const updateCategory = useAppStore((s) => s.updateCategory);
   const deleteCategory = useAppStore((s) => s.deleteCategory);
   const checkConstraints = useAppStore((s) => s.checkCategoryDeleteConstraints);
   const navigate       = useNavigate();
@@ -229,7 +122,6 @@ export function CategoriesPage() {
                 <CategoryRow
                   key={cat.id}
                   category={cat}
-                  onSave={(name, status) => updateCategory(cat.id, { name, status })}
                   onDelete={() => deleteCategory(cat.id)}
                   deleteBlockReasons={checkConstraints(cat.id)}
                 />
@@ -242,24 +134,128 @@ export function CategoriesPage() {
   );
 }
 
-// ─── Add Product page ─────────────────────────────────────────────────────────
-export function AddCategoryPage() {
+// ─── Shared variant selector panel (reused in Add + Edit) ────────────────────
+interface SharedVariantPanelProps {
+  selectedSvIds: string[];
+  onChange: (ids: string[]) => void;
+  /** Ref to the first checkbox — used for keyboard focus from name field */
+  firstCheckboxRef: React.RefObject<HTMLInputElement | null>;
+  /** Ref to the save button — Enter on last checkbox lands here */
+  saveBtnRef: React.RefObject<HTMLButtonElement | null>;
+}
+
+function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtnRef }: SharedVariantPanelProps) {
   const navigate       = useNavigate();
-  const addCategory    = useAppStore((s) => s.addCategory);
   const sharedVariants = useAppStore((s) => s.sharedVariants);
-
-  const [name,           setName]           = useState('');
-  const [selectedSvIds,  setSelectedSvIds]  = useState<string[]>([]);
-
-  const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '/categories';
-  const firstCheckboxRef = useRef<HTMLInputElement>(null);
-
-  useEscapeBack(() => navigate(returnTo));
 
   const activeSharedVariants = useMemo(
     () => sharedVariants.filter((sv) => sv.status === 'Active'),
     [sharedVariants],
   );
+
+  const toggle = (id: string) =>
+    onChange(
+      selectedSvIds.includes(id)
+        ? selectedSvIds.filter((s) => s !== id)
+        : [...selectedSvIds, id],
+    );
+
+  return (
+    <Card className="p-6">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-brand font-bold text-base">⬡</span>
+        <h3 className="text-base font-semibold">Inherited Variants</h3>
+      </div>
+      <p className="text-xs text-muted mb-4">
+        Every sub-product under this product will automatically get these shared variants.
+      </p>
+
+      {activeSharedVariants.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted">
+          <p>No shared variants in the library yet.</p>
+          <button
+            type="button"
+            onClick={() => navigate('/shared-variants')}
+            className="text-brand hover:underline text-xs mt-1"
+          >
+            Go create some →
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {activeSharedVariants.map((sv, idx) => {
+            const checked = selectedSvIds.includes(sv.id);
+            const isLast  = idx === activeSharedVariants.length - 1;
+            return (
+              <label
+                key={sv.id}
+                className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                  checked ? 'border-brand/40 bg-brand/5' : 'border-border hover:bg-surface'
+                }`}
+              >
+                <input
+                  ref={idx === 0 ? firstCheckboxRef : undefined}
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(sv.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      toggle(sv.id);
+                      // Last variant → move focus to Save button
+                      if (isLast) {
+                        saveBtnRef.current?.focus();
+                      } else {
+                        focusNextInForm(e.currentTarget);
+                      }
+                    }
+                  }}
+                  className="mt-0.5 accent-brand shrink-0"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-charcoal">{sv.name}</p>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      {selectedSvIds.length > 0 && (
+        <p className="mt-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+          {selectedSvIds.length} variant{selectedSvIds.length !== 1 ? 's' : ''} will be inherited by all sub-products
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// ─── Add Product page ─────────────────────────────────────────────────────────
+export function AddCategoryPage() {
+  const navigate    = useNavigate();
+  const addCategory = useAppStore((s) => s.addCategory);
+
+  const [name,          setName]          = useState('');
+  const [selectedSvIds, setSelectedSvIds] = useState<string[]>([]);
+
+  const returnTo         = new URLSearchParams(window.location.search).get('returnTo') ?? '/categories';
+  const firstCheckboxRef = useRef<HTMLInputElement>(null);
+  const saveBtnRef       = useRef<HTMLButtonElement>(null);
+
+  useEscapeBack(() => navigate(returnTo));
+
+  // Ctrl+Enter → save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (name.trim()) saveBtnRef.current?.click();
+        else saveBtnRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [name]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,7 +267,20 @@ export function AddCategoryPage() {
   return (
     <div>
       <PageHeader title="Add Product" subtitle="Create a new product and choose which shared variants every sub-product will inherit." />
-      {/* data-form wraps both columns so Enter from the name field walks into the variants panel */}
+
+      {/* Keyboard hint */}
+      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-700">
+        <span className="font-semibold">⌨ Keyboard Mode</span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on name → move to variants</span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on variant → toggle &amp; move</span>
+        <span className="text-blue-500">·</span>
+        <span className="font-semibold text-blue-800">
+          <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> — Save Product
+        </span>
+      </div>
+
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-3xl" data-form>
           {/* ── Product name ── */}
@@ -288,15 +297,18 @@ export function AddCategoryPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      // Jump to first shared variant checkbox, or submit if none
-                      if (activeSharedVariants.length > 0) {
-                        firstCheckboxRef.current?.focus();
-                      }
+                      // Jump to first shared variant checkbox (or save if none)
+                      firstCheckboxRef.current ? firstCheckboxRef.current.focus() : saveBtnRef.current?.focus();
                     }
                   }}
                 />
                 <div className="flex gap-3 pt-2">
-                  <Button type="submit" disabled={!name.trim()}>Save Product</Button>
+                  <Button ref={saveBtnRef} type="submit" disabled={!name.trim()}>
+                    Save Product
+                    {name.trim() && (
+                      <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
+                    )}
+                  </Button>
                   <Button type="button" variant="outline" onClick={() => navigate(returnTo)}>Cancel</Button>
                 </div>
               </div>
@@ -305,80 +317,12 @@ export function AddCategoryPage() {
 
           {/* ── Shared Variants to inherit ── */}
           <div>
-            <Card className="p-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-brand font-bold text-base">⬡</span>
-                <h3 className="text-base font-semibold">Inherited Variants</h3>
-              </div>
-              <p className="text-xs text-muted mb-4">
-                Every sub-product added under this product will automatically get these shared variants. You can change this later by editing the product.
-              </p>
-
-              {activeSharedVariants.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted">
-                  <p>No shared variants in the library yet.</p>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/shared-variants')}
-                    className="text-brand hover:underline text-xs mt-1"
-                  >
-                    Go create some →
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {activeSharedVariants.map((sv, idx) => {
-                    const checked = selectedSvIds.includes(sv.id);
-                    return (
-                      <label
-                        key={sv.id}
-                        className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
-                          checked
-                            ? 'border-brand/40 bg-brand/5'
-                            : 'border-border hover:bg-surface'
-                        }`}
-                      >
-                        <input
-                          ref={idx === 0 ? firstCheckboxRef : undefined}
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setSelectedSvIds((prev) =>
-                              checked ? prev.filter((id) => id !== sv.id) : [...prev, sv.id],
-                            )
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              // Toggle current checkbox then move to next
-                              setSelectedSvIds((prev) =>
-                                checked ? prev.filter((id) => id !== sv.id) : [...prev, sv.id],
-                              );
-                              focusNextInForm(e.currentTarget);
-                            }
-                          }}
-                          className="mt-0.5 accent-brand shrink-0"
-                        />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-charcoal">{sv.name}</p>
-                          {sv.attributes.length > 0 && (
-                            <p className="text-xs text-muted truncate">
-                              {sv.attributes.map((a) => `${a.key}: ${a.value}`).join(' · ')}
-                            </p>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
-
-              {selectedSvIds.length > 0 && (
-                <p className="mt-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                  {selectedSvIds.length} variant{selectedSvIds.length !== 1 ? 's' : ''} will be inherited by all sub-products
-                </p>
-              )}
-            </Card>
+            <SharedVariantPanel
+              selectedSvIds={selectedSvIds}
+              onChange={setSelectedSvIds}
+              firstCheckboxRef={firstCheckboxRef}
+              saveBtnRef={saveBtnRef}
+            />
           </div>
         </div>
       </form>
