@@ -5,7 +5,7 @@ import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, KPICard, PageHeader } from '../components/ui/Card';
 import { Input, SearchableSelect, Select, Textarea } from '../components/ui/Input';
-import { ConfirmDialog } from '../components/ui/Modal';
+import { ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import {
   formatCurrency,
@@ -33,8 +33,10 @@ export function JobWorkDetailPage() {
   const products = useAppStore((s) => s.products);
   const addPayment = useAppStore((s) => s.addPayment);
   const deleteJobWork = useAppStore((s) => s.deleteJobWork);
+  const checkConstraints = useAppStore((s) => s.checkJobWorkDeleteConstraints);
   const [activeTab, setActiveTab] = useState('Overview');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteBlockReasons, setDeleteBlockReasons] = useState<string[]>([]);
   const [paymentForm, setPaymentForm] = useState({
     paymentType: 'Advance' as 'Advance' | 'Running' | 'Final' | 'Balance',
     paid: '',
@@ -130,7 +132,11 @@ export function JobWorkDetailPage() {
             </Button>
             <Button
               variant="danger"
-              onClick={() => setShowDeleteDialog(true)}
+              onClick={() => {
+                const reasons = checkConstraints(job.id);
+                setDeleteBlockReasons(reasons);
+                setShowDeleteDialog(true);
+              }}
             >
               <Trash2 size={14} /> Delete
             </Button>
@@ -499,7 +505,7 @@ export function JobWorkDetailPage() {
 
       {/* Delete confirmation dialog */}
       <ConfirmDialog
-        open={showDeleteDialog}
+        open={showDeleteDialog && deleteBlockReasons.length === 0}
         onClose={() => setShowDeleteDialog(false)}
         onConfirm={() => {
           deleteJobWork(job.id);
@@ -509,6 +515,14 @@ export function JobWorkDetailPage() {
         message={`Are you sure you want to delete ${job.jobNumber}? This action cannot be undone.`}
         confirmLabel="Delete"
         danger
+      />
+
+      <BlockedDeleteDialog
+        open={showDeleteDialog && deleteBlockReasons.length > 0}
+        onClose={() => { setShowDeleteDialog(false); setDeleteBlockReasons([]); }}
+        title="Cannot Delete Job Work"
+        entityName={job.jobNumber}
+        reasons={deleteBlockReasons}
       />
     </div>
   );

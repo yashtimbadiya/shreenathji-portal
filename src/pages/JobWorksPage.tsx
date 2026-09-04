@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { PageHeader } from '../components/ui/Card';
-import { ConfirmDialog } from '../components/ui/Modal';
+import { ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import {
   formatDate,
@@ -15,6 +15,7 @@ import {
 } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import type { JobStatus } from '../types';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
 // Jobs in these statuses can be edited or deleted
 const EDITABLE_STATUSES: JobStatus[] = ['Draft', 'Sent'];
@@ -25,13 +26,17 @@ export function JobWorksPage() {
   const vendors      = useAppStore((s) => s.vendors);
   const products     = useAppStore((s) => s.products);
   const deleteJobWork = useAppStore((s) => s.deleteJobWork);
+  const checkConstraints = useAppStore((s) => s.checkJobWorkDeleteConstraints);
 
   const [searchParams]  = useSearchParams();
   const statusFilter    = searchParams.get('status') as JobStatus | null;
   const [search, setSearch] = useState('');
 
+  // N → Create new job work
+  useNewItemShortcut(() => navigate('/job-works/create'));
+
   // Delete confirmation dialog state
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; jobNumber: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; jobNumber: string; cascadeWarnings: string[] } | null>(null);
 
   const filtered = useMemo(() => {
     return jobWorks.filter((j) => {
@@ -113,7 +118,11 @@ export function JobWorksPage() {
                           </button>
                           <button
                             title="Delete job work"
-                            onClick={() => setDeleteTarget({ id: job.id, jobNumber: job.jobNumber })}
+                            onClick={() => {
+                              const reasons = checkConstraints(job.id);
+                              // With cascading deletes, always allow deletion — warn if related data will also be removed
+                              setDeleteTarget({ id: job.id, jobNumber: job.jobNumber, cascadeWarnings: reasons });
+                            }}
                             className="p-1.5 rounded-lg text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
                           >
                             <Trash2 size={14} />
@@ -131,15 +140,23 @@ export function JobWorksPage() {
 
       {/* Delete confirmation */}
       <ConfirmDialog
-        open={deleteTarget !== null}
+        open={deleteTarget !== null && deleteTarget.cascadeWarnings.length === 0}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => {
           if (deleteTarget) deleteJobWork(deleteTarget.id);
         }}
         title="Delete Job Work"
-        message={`Are you sure you want to delete ${deleteTarget?.jobNumber ?? 'this job work'}? This action cannot be undone.`}
+        message={`Delete ${deleteTarget?.jobNumber ?? 'this job work'}? This cannot be undone.`}
         confirmLabel="Delete"
         danger
+      />
+
+      <BlockedDeleteDialog
+        open={deleteTarget !== null && (deleteTarget?.cascadeWarnings.length ?? 0) > 0}
+        onClose={() => setDeleteTarget(null)}
+        title="Cannot Delete Job Work"
+        entityName={deleteTarget?.jobNumber ?? ''}
+        reasons={deleteTarget?.cascadeWarnings ?? []}
       />
     </div>
   );
