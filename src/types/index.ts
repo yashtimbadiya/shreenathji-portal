@@ -40,6 +40,8 @@ export interface Category {
   status: 'Active' | 'Disabled';
   createdDate: string;
   productCount: number;
+  /** Shared variant IDs that every sub-product in this category should inherit */
+  sharedVariantIds?: string[];
 }
 
 export interface VariantAttribute {

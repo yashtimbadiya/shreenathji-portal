@@ -1,11 +1,13 @@
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useEscapeBack } from '../hooks/useEscapeBack';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 import { Button } from '../components/ui/Button';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { Card, PageHeader } from '../components/ui/Card';
-import { Input } from '../components/ui/Input';
-import { ConfirmDialog } from '../components/ui/Modal';
+import { focusNextInForm, Input } from '../components/ui/Input';
+import { BlockedDeleteDialog, ConfirmDialog } from '../components/ui/Modal';
 import { formatDate } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import type { Category } from '../types';
@@ -15,13 +17,16 @@ interface CategoryRowProps {
   category: Category;
   onSave: (name: string, status: 'Active' | 'Disabled') => void;
   onDelete: () => void;
+  /** Pre-computed blocking reasons — if non-empty, delete is blocked */
+  deleteBlockReasons: string[];
 }
 
-function CategoryRow({ category, onSave, onDelete }: CategoryRowProps) {
+function CategoryRow({ category, onSave, onDelete, deleteBlockReasons }: CategoryRowProps) {
   const [editing,       setEditing]       = useState(false);
   const [name,          setName]          = useState(category.name);
   const [status,        setStatus]        = useState<'Active' | 'Disabled'>(category.status);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [blockedDelete, setBlockedDelete] = useState(false);
 
   const handleSave = () => {
     if (!name.trim()) return;
@@ -112,6 +117,13 @@ function CategoryRow({ category, onSave, onDelete }: CategoryRowProps) {
           confirmLabel="Delete"
           danger
         />
+        <BlockedDeleteDialog
+          open={blockedDelete}
+          onClose={() => setBlockedDelete(false)}
+          title="Cannot Delete Product"
+          entityName={category.name}
+          reasons={deleteBlockReasons}
+        />
       </>
     );
   }
@@ -141,7 +153,7 @@ function CategoryRow({ category, onSave, onDelete }: CategoryRowProps) {
             </button>
             <button
               type="button"
-              onClick={() => setConfirmDelete(true)}
+              onClick={() => deleteBlockReasons.length > 0 ? setBlockedDelete(true) : setConfirmDelete(true)}
               className="flex items-center gap-1 text-xs text-muted hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
               title="Delete product"
             >
@@ -160,6 +172,13 @@ function CategoryRow({ category, onSave, onDelete }: CategoryRowProps) {
         confirmLabel="Delete"
         danger
       />
+      <BlockedDeleteDialog
+        open={blockedDelete}
+        onClose={() => setBlockedDelete(false)}
+        title="Cannot Delete Product"
+        entityName={category.name}
+        reasons={deleteBlockReasons}
+      />
     </>
   );
 }
@@ -169,6 +188,11 @@ export function CategoriesPage() {
   const categories     = useAppStore((s) => s.categories);
   const updateCategory = useAppStore((s) => s.updateCategory);
   const deleteCategory = useAppStore((s) => s.deleteCategory);
+  const checkConstraints = useAppStore((s) => s.checkCategoryDeleteConstraints);
+  const navigate       = useNavigate();
+
+  // N → navigate to Add Product page
+  useNewItemShortcut(() => navigate('/categories/new'));
 
   return (
     <div>
@@ -207,6 +231,7 @@ export function CategoriesPage() {
                   category={cat}
                   onSave={(name, status) => updateCategory(cat.id, { name, status })}
                   onDelete={() => deleteCategory(cat.id)}
+                  deleteBlockReasons={checkConstraints(cat.id)}
                 />
               ))}
             </tbody>
@@ -219,38 +244,144 @@ export function CategoriesPage() {
 
 // ─── Add Product page ─────────────────────────────────────────────────────────
 export function AddCategoryPage() {
-  const navigate    = useNavigate();
-  const addCategory = useAppStore((s) => s.addCategory);
-  const [name, setName] = useState('');
+  const navigate       = useNavigate();
+  const addCategory    = useAppStore((s) => s.addCategory);
+  const sharedVariants = useAppStore((s) => s.sharedVariants);
+
+  const [name,           setName]           = useState('');
+  const [selectedSvIds,  setSelectedSvIds]  = useState<string[]>([]);
 
   const returnTo = new URLSearchParams(window.location.search).get('returnTo') ?? '/categories';
+  const firstCheckboxRef = useRef<HTMLInputElement>(null);
+
+  useEscapeBack(() => navigate(returnTo));
+
+  const activeSharedVariants = useMemo(
+    () => sharedVariants.filter((sv) => sv.status === 'Active'),
+    [sharedVariants],
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    addCategory(name.trim());
+    addCategory(name.trim(), selectedSvIds);
     navigate(returnTo);
   };
 
   return (
     <div>
-      <PageHeader title="Add Product" subtitle="Create a new product" />
-      <Card className="p-6 max-w-lg">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input
-            label="Product Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Elastic"
-            required
-            autoFocus
-          />
-          <div className="flex gap-3">
-            <Button type="submit" disabled={!name.trim()}>Save Product</Button>
-            <Button type="button" variant="outline" onClick={() => navigate(returnTo)}>Cancel</Button>
+      <PageHeader title="Add Product" subtitle="Create a new product and choose which shared variants every sub-product will inherit." />
+      {/* data-form wraps both columns so Enter from the name field walks into the variants panel */}
+      <form onSubmit={handleSubmit}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-3xl" data-form>
+          {/* ── Product name ── */}
+          <div className="lg:col-span-2">
+            <Card className="p-6">
+              <div className="space-y-4">
+                <Input
+                  label="Product Name *"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Elastic"
+                  required
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      // Jump to first shared variant checkbox, or submit if none
+                      if (activeSharedVariants.length > 0) {
+                        firstCheckboxRef.current?.focus();
+                      }
+                    }
+                  }}
+                />
+                <div className="flex gap-3 pt-2">
+                  <Button type="submit" disabled={!name.trim()}>Save Product</Button>
+                  <Button type="button" variant="outline" onClick={() => navigate(returnTo)}>Cancel</Button>
+                </div>
+              </div>
+            </Card>
           </div>
-        </form>
-      </Card>
+
+          {/* ── Shared Variants to inherit ── */}
+          <div>
+            <Card className="p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-brand font-bold text-base">⬡</span>
+                <h3 className="text-base font-semibold">Inherited Variants</h3>
+              </div>
+              <p className="text-xs text-muted mb-4">
+                Every sub-product added under this product will automatically get these shared variants. You can change this later by editing the product.
+              </p>
+
+              {activeSharedVariants.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted">
+                  <p>No shared variants in the library yet.</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/shared-variants')}
+                    className="text-brand hover:underline text-xs mt-1"
+                  >
+                    Go create some →
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {activeSharedVariants.map((sv, idx) => {
+                    const checked = selectedSvIds.includes(sv.id);
+                    return (
+                      <label
+                        key={sv.id}
+                        className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                          checked
+                            ? 'border-brand/40 bg-brand/5'
+                            : 'border-border hover:bg-surface'
+                        }`}
+                      >
+                        <input
+                          ref={idx === 0 ? firstCheckboxRef : undefined}
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setSelectedSvIds((prev) =>
+                              checked ? prev.filter((id) => id !== sv.id) : [...prev, sv.id],
+                            )
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              // Toggle current checkbox then move to next
+                              setSelectedSvIds((prev) =>
+                                checked ? prev.filter((id) => id !== sv.id) : [...prev, sv.id],
+                              );
+                              focusNextInForm(e.currentTarget);
+                            }
+                          }}
+                          className="mt-0.5 accent-brand shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-charcoal">{sv.name}</p>
+                          {sv.attributes.length > 0 && (
+                            <p className="text-xs text-muted truncate">
+                              {sv.attributes.map((a) => `${a.key}: ${a.value}`).join(' · ')}
+                            </p>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selectedSvIds.length > 0 && (
+                <p className="mt-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  {selectedSvIds.length} variant{selectedSvIds.length !== 1 ? 's' : ''} will be inherited by all sub-products
+                </p>
+              )}
+            </Card>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

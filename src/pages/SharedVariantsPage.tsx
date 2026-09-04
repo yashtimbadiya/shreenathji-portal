@@ -10,9 +10,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
+import { ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { useAppStore } from '../store/useAppStore';
 import type { SharedVariant, VariantAttribute } from '../types';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline attribute row editor
@@ -198,10 +200,16 @@ export function SharedVariantsPage() {
   const updateSharedVariant = useAppStore((s) => s.updateSharedVariant);
   const deleteSharedVariant = useAppStore((s) => s.deleteSharedVariant);
   const products          = useAppStore((s) => s.products);
+  const checkConstraints  = useAppStore((s) => s.checkSharedVariantDeleteConstraints);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId,   setEditingId]   = useState<string | null>(null);
   const [search,      setSearch]      = useState('');
+  const [deleteTarget,  setDeleteTarget]  = useState<SharedVariant | null>(null);
+  const [blockedTarget, setBlockedTarget] = useState<{ name: string; reasons: string[] } | null>(null);
+
+  // N → open Add Variant form
+  useNewItemShortcut(() => { setShowAddForm(true); setEditingId(null); });
 
   const filtered = useMemo(() => {
     if (!search.trim()) return sharedVariants;
@@ -250,13 +258,12 @@ export function SharedVariantsPage() {
   };
 
   const handleDelete = (sv: SharedVariant) => {
-    const uses = usageMap.get(sv.id) ?? 0;
-    const msg =
-      uses > 0
-        ? `"${sv.name}" is used by ${uses} product${uses !== 1 ? 's' : ''}. Deleting it will remove it from those products' variant lists. Continue?`
-        : `Delete shared variant "${sv.name}"?`;
-    if (!confirm(msg)) return;
-    deleteSharedVariant(sv.id);
+    const reasons = checkConstraints(sv.id);
+    if (reasons.length > 0) {
+      setBlockedTarget({ name: sv.name, reasons });
+    } else {
+      setDeleteTarget(sv);
+    }
   };
 
   return (
@@ -416,6 +423,25 @@ export function SharedVariantsPage() {
           );
         })}
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) deleteSharedVariant(deleteTarget.id);
+        }}
+        title="Delete Shared Variant"
+        message={`Delete shared variant "${deleteTarget?.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+      />
+      <BlockedDeleteDialog
+        open={!!blockedTarget}
+        onClose={() => setBlockedTarget(null)}
+        title="Cannot Delete Shared Variant"
+        entityName={blockedTarget?.name ?? ''}
+        reasons={blockedTarget?.reasons ?? []}
+      />
     </div>
   );
 }

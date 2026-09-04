@@ -65,7 +65,7 @@ export class PortalLocalDb extends Dexie {
 export const portalDb = new PortalLocalDb();
 
 export async function clearLocalDatabase() {
-  await portalDb.close();
+  portalDb.close();
   await portalDb.delete();
   await portalDb.open();
 }
@@ -200,6 +200,22 @@ export async function deleteProductRecord(id: string): Promise<void> {
   await portalDb.products.delete(id);
 }
 
+export async function deleteVendorRecord(id: string): Promise<void> {
+  await portalDb.vendors.delete(id);
+}
+
+export async function deletePaymentRecord(id: string): Promise<void> {
+  await portalDb.payments.delete(id);
+}
+
 export async function deleteCategoryRecord(id: string): Promise<void> {
   await portalDb.categories.delete(id);
+}
+
+export async function deleteDispatchRecord(id: string): Promise<void> {
+  await portalDb.dispatches.delete(id);
+}
+
+export async function deleteReceiptRecord(id: string): Promise<void> {
+  await portalDb.receipts.delete(id);
 }

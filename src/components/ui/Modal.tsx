@@ -75,3 +75,56 @@ export function ConfirmDialog({
     </Modal>
   );
 }
+
+/**
+ * BlockedDeleteDialog — shown when a delete is blocked because the entity
+ * is still referenced by other data. Explains why and lists what's in the way.
+ */
+export function BlockedDeleteDialog({
+  open,
+  onClose,
+  title,
+  entityName,
+  reasons,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  entityName: string;
+  /** Each reason is one sentence explaining why deletion is blocked */
+  reasons: string[];
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      size="sm"
+      footer={
+        <Button variant="outline" onClick={onClose}>
+          OK
+        </Button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="flex items-start gap-2.5 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5">
+          <span className="text-red-500 text-base leading-none mt-0.5 shrink-0">⛔</span>
+          <p className="text-sm font-medium text-red-700">
+            <strong>"{entityName}"</strong> cannot be deleted because it is still in use.
+          </p>
+        </div>
+        <ul className="space-y-1.5">
+          {reasons.map((r, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-muted">
+              <span className="text-red-400 shrink-0 mt-0.5">•</span>
+              <span>{r}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted pt-1 border-t border-border">
+          Remove or reassign the above references first, then try deleting again.
+        </p>
+      </div>
+    </Modal>
+  );
+}

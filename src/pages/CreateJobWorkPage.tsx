@@ -5,6 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, PageHeader } from '../components/ui/Card';
 import { focusNextInForm, Input, SearchableSelect, Select } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
 
 // ─── Session-storage keys (survive round-trip to Add Reference / Category) ───
 const DRAFT_KEY  = 'shjw:create-job-draft-v2';
@@ -71,6 +72,8 @@ function PrintChallanDialog({
   const categories  = useAppStore((s) => s.categories);
   const settings    = useAppStore((s) => s.settings);
 
+  const printBtnRef = useRef<HTMLButtonElement>(null);
+
   const dispatch = dispatches.find((d) => d.id === challanId);
   const job      = jobWorks.find((j) => j.id === jobId);
   const vendor   = vendors.find((v) => v.id === job?.vendorId) ?? null;
@@ -90,6 +93,25 @@ function PrintChallanDialog({
     ? items.reduce((s, i) => s + (i.weight ?? 0), 0)
     : null;
 
+  // ── ESC closes the dialog ────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handler, true); // capture phase — runs before page-level handlers
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [onClose]);
+
+  // ── Auto-focus the Print button when dialog mounts ───────────────────────
+  useEffect(() => {
+    const t = setTimeout(() => printBtnRef.current?.focus(), 60);
+    return () => clearTimeout(t);
+  }, []);
+
   const handlePrint = () => {
     window.print();
   };
@@ -108,8 +130,21 @@ function PrintChallanDialog({
     <>
       {/* ── Print CSS: hide everything except challan, size A5 landscape ── */}
       <style>{`
+        @media screen {
+          #challan-print-root {
+            display: none;
+          }
+        }
         @media print {
-          @page { size: A5 landscape; margin: 8mm; }
+          @page {
+            size: A5 landscape;
+            margin: 8mm;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+          }
           body * { visibility: hidden !important; }
           #challan-print-root,
           #challan-print-root * { visibility: visible !important; }
@@ -119,15 +154,17 @@ function PrintChallanDialog({
             top: 0 !important;
             left: 0 !important;
             width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
             background: #fff !important;
           }
         }
       `}</style>
 
-      {/* ── Challan content — hidden on screen (no !important), shown on print ── */}
+      {/* ── Challan content — hidden on screen via CSS, shown on print ── */}
       <div
         id="challan-print-root"
-        style={{ display: 'none', fontFamily: 'sans-serif', fontSize: '11px' }}
+        style={{ fontFamily: 'sans-serif', fontSize: '11px' }}
       >
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #c41e3a', paddingBottom: '8px', marginBottom: '12px' }}>
@@ -265,7 +302,7 @@ function PrintChallanDialog({
       </div>
 
       {/* ── Screen dialog overlay ── */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm print:hidden">
+      <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm print:hidden">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
           {/* Header */}
           <div className="flex items-center gap-3 px-6 py-5 border-b border-border">
@@ -309,6 +346,11 @@ function PrintChallanDialog({
                 Do you want to print the delivery challan for this dispatch?
               </p>
             </div>
+
+            {/* ESC hint */}
+            <p className="text-xs text-center text-muted">
+              Press <kbd className="bg-surface border border-border px-1.5 py-0.5 rounded font-mono">Esc</kbd> to go back to the job
+            </p>
           </div>
 
           {/* Footer */}
@@ -316,21 +358,22 @@ function PrintChallanDialog({
             <button
               type="button"
               onClick={handleViewJob}
-              className="px-4 py-2 rounded-lg border border-border text-sm font-medium text-charcoal hover:bg-surface transition-colors"
+              className="cursor-pointer px-4 py-2 rounded-lg border border-border text-sm font-medium text-charcoal hover:bg-surface transition-colors"
             >
               Skip, View Job
             </button>
             <button
               type="button"
               onClick={handleViewChallan}
-              className="px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted hover:bg-surface transition-colors"
+              className="cursor-pointer px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted hover:bg-surface transition-colors"
             >
               View Challan
             </button>
             <button
+              ref={printBtnRef}
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand/90 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40"
+              className="cursor-pointer inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand/90 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40"
             >
               <Printer size={15} />
               Yes, Print
@@ -419,6 +462,9 @@ export function CreateJobWorkPage() {
   const clearDraft = () => {
     try { sessionStorage.removeItem(DRAFT_KEY); sessionStorage.removeItem(SCROLL_KEY); } catch { /* ignore */ }
   };
+
+  // ESC → discard draft and go back to job works list
+  useEscapeBack(() => { clearDraft(); navigate('/job-works'); }, !printDialog?.open);
 
   // ── Ctrl+Enter → Confirm & Dispatch ─────────────────────────────────────
   useEffect(() => {

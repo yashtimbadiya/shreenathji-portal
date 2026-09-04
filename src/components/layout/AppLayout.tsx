@@ -4,6 +4,8 @@ import { useAppStore } from '../../store/useAppStore';
 import { ToastContainer } from '../ui/Toast';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
+import { useAutoBackup } from '../../hooks/useAutoBackup';
+import { useGlobalEscNavigation } from '../../hooks/useGlobalEscNavigation';
 
 export function AppLayout() {
   const currentUser = useAppStore((s) => s.currentUser);
@@ -16,11 +18,16 @@ export function AppLayout() {
     }
   }, [currentUser, loadLocalData]);
 
+  // ── Auto-backup (daily + on close) ───────────────────────────────────────
+  useAutoBackup();
+
+  // ── Global ESC navigation (child → parent → dashboard) ───────────────────
+  useGlobalEscNavigation();
+
   // ── Global shortcut: Ctrl+Shift+N → Create New Job Card ──────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
-        // Skip if user is typing in an input / textarea (except this is a global nav shortcut so we allow it)
         e.preventDefault();
         navigate('/job-works/create');
       }

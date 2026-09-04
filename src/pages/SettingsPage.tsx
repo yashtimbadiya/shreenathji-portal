@@ -1,10 +1,20 @@
-import { useRef, useMemo, useState } from 'react';
-import { Download, Upload, AlertTriangle, CheckCircle2, Wifi, WifiOff, FileSpreadsheet } from 'lucide-react';
+import { useRef, useMemo, useState, useEffect } from 'react';
+import { Download, Upload, AlertTriangle, CheckCircle2, Wifi, WifiOff, FileSpreadsheet, FolderOpen, ShieldCheck, Clock } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, PageHeader } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
 import { exportToExcel, importFromExcel } from '../api/excelBackup';
+import {
+  supportsFileSystemAccess,
+  loadDirectoryHandle,
+  saveDirectoryHandle,
+  clearDirectoryHandle,
+  verifyPermission,
+  writeBackupToFolder,
+  triggerDownloadBackup,
+  getLastBackupTime,
+} from '../api/autoBackup';
 
 export function SettingsPage() {
   const settings          = useAppStore((s) => s.settings);
@@ -20,6 +30,73 @@ export function SettingsPage() {
   const [importMessage, setImportMessage] = useState('');
   const [importCounts,  setImportCounts]  = useState<Record<string, number> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Auto Backup state ───────────────────────────────────────────────────────
+  const [folderName,      setFolderName]      = useState<string | null>(null);
+  const [backupStatus,    setBackupStatus]    = useState<'idle' | 'working' | 'done' | 'error' | 'no-permission'>('idle');
+  const [lastBackupTime,  setLastBackupTimeState] = useState<string | null>(getLastBackupTime());
+
+  // Load saved folder name on mount
+  useEffect(() => {
+    loadDirectoryHandle().then(async (handle) => {
+      if (!handle) return;
+      const ok = await verifyPermission(handle, 'read');
+      setFolderName(ok ? handle.name : null);
+      if (!ok) await clearDirectoryHandle();
+    });
+  }, []);
+
+  const handleChooseFolder = async () => {
+    if (!supportsFileSystemAccess) return;
+    try {
+      const handle = await (window as unknown as {
+        showDirectoryPicker(opts?: { mode?: string }): Promise<FileSystemDirectoryHandle>;
+      }).showDirectoryPicker({ mode: 'readwrite' });
+      await saveDirectoryHandle(handle);
+      setFolderName(handle.name);
+      setBackupStatus('idle');
+    } catch {
+      // User cancelled — do nothing
+    }
+  };
+
+  const handleRemoveFolder = async () => {
+    await clearDirectoryHandle();
+    setFolderName(null);
+    setBackupStatus('idle');
+  };
+
+  const handleBackupNow = async () => {
+    setBackupStatus('working');
+    try {
+      const handle = await loadDirectoryHandle();
+      if (handle) {
+        const ok = await writeBackupToFolder();
+        if (ok) {
+          setLastBackupTimeState(new Date().toISOString());
+          setBackupStatus('done');
+        } else {
+          setBackupStatus('no-permission');
+        }
+      } else {
+        // No folder — fall back to download
+        await triggerDownloadBackup();
+        setLastBackupTimeState(new Date().toISOString());
+        setBackupStatus('done');
+      }
+    } catch {
+      setBackupStatus('error');
+    }
+    setTimeout(() => setBackupStatus('idle'), 5000);
+  };
+
+  const formatBackupTime = (iso: string | null) => {
+    if (!iso) return null;
+    return new Date(iso).toLocaleString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
 
   const fieldGroups = useMemo(() => [
     {
@@ -249,8 +326,124 @@ export function SettingsPage() {
           </div>
         </Card>
 
-        {/* ── Company & Numbering settings ──────────────────────────────────── */}
-        {fieldGroups.map((group) => (
+        {/* ── Auto Backup ──────────────────────────────────────────────────── */}
+        <Card className="p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <ShieldCheck size={18} className="text-brand" />
+            <h3 className="text-base font-semibold">Auto Backup</h3>
+          </div>
+          <p className="text-xs text-muted mb-5">
+            Choose a folder on your computer. The app will automatically save an Excel backup to that folder
+            when you close the tab and once per day on first load — no manual action needed.
+            {!supportsFileSystemAccess && (
+              <span className="block mt-1 text-orange-600 font-medium">
+                ⚠ Your browser doesn't support folder access (requires Chrome or Edge 86+).
+                Use "Backup Now" below to download a manual copy instead.
+              </span>
+            )}
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* ── Folder picker card ── */}
+            <div className="rounded-lg border border-border p-4 flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-brand/10 p-2 shrink-0">
+                  <FolderOpen size={16} className="text-brand" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Backup Folder</p>
+                  {folderName ? (
+                    <p className="text-xs text-green-700 mt-0.5 font-medium flex items-center gap-1">
+                      <CheckCircle2 size={11} /> {folderName}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted mt-0.5">No folder selected</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-auto">
+                {supportsFileSystemAccess && (
+                  <button
+                    type="button"
+                    onClick={handleChooseFolder}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-brand/40 bg-brand/5 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10 transition-colors"
+                  >
+                    <FolderOpen size={14} />
+                    {folderName ? 'Change Folder' : 'Choose Folder'}
+                  </button>
+                )}
+                {folderName && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveFolder}
+                    className="px-3 py-2 rounded-lg border border-border text-xs text-muted hover:text-red-600 hover:border-red-200 transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ── Status + manual trigger ── */}
+            <div className="rounded-lg border border-border p-4 flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-surface p-2 shrink-0 border border-border">
+                  <Clock size={16} className="text-muted" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Last Backup</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    {lastBackupTime
+                      ? formatBackupTime(lastBackupTime)
+                      : 'No backup recorded yet'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleBackupNow}
+                disabled={backupStatus === 'working'}
+                className={`mt-auto flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
+                  ${backupStatus === 'working'
+                    ? 'border-border text-muted cursor-not-allowed'
+                    : backupStatus === 'done'
+                    ? 'border-green-300 bg-green-50 text-green-700'
+                    : backupStatus === 'error' || backupStatus === 'no-permission'
+                    ? 'border-red-300 bg-red-50 text-red-600'
+                    : 'border-brand/40 text-brand hover:bg-brand/5'
+                  }`}
+              >
+                {backupStatus === 'working' ? (
+                  <><span className="animate-spin text-base">⏳</span> Backing up…</>
+                ) : backupStatus === 'done' ? (
+                  <><CheckCircle2 size={15} /> Backup saved!</>
+                ) : backupStatus === 'no-permission' ? (
+                  <><AlertTriangle size={15} /> Permission denied — re-choose folder</>
+                ) : backupStatus === 'error' ? (
+                  <><AlertTriangle size={15} /> Backup failed — try again</>
+                ) : (
+                  <><Download size={15} /> {folderName ? 'Backup Now' : 'Download Backup'}</>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* How it works */}
+          <div className="mt-4 rounded-lg bg-surface border border-border px-4 py-3 text-xs text-muted space-y-1">
+            <p className="font-semibold text-charcoal text-xs">How auto backup works:</p>
+            <p>• <strong>On close</strong> — when you close the tab or browser, a backup is written automatically to your chosen folder.</p>
+            <p>• <strong>Daily</strong> — the first time you open the app each day, a backup is created.</p>
+            <p>• <strong>File names</strong> — each backup is saved as <code className="bg-white border border-border px-1 rounded">snj-backup-YYYY-MM-DD_HH-MM.xlsx</code> so old backups are never overwritten.</p>
+            {!supportsFileSystemAccess && (
+              <p className="text-orange-600 font-medium">• Folder-based backup requires Chrome or Edge. Use "Download Backup" to save manually.</p>
+            )}
+          </div>
+        </Card>
+
+        {/* ── Company & Numbering settings ──────────────────────────────────── */}        {fieldGroups.map((group) => (
           <Card key={group.title} className="p-6">
             <CardHeader title={group.title} />
             <div className="grid gap-4 md:grid-cols-2 mt-4">

@@ -26,4 +26,8 @@ export {
   createReceipt,
   deleteProductRecord,
   deleteCategoryRecord,
+  deleteVendorRecord,
+  deletePaymentRecord,
+  deleteDispatchRecord,
+  deleteReceiptRecord,
 } from './supabaseClient';

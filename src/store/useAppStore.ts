@@ -25,11 +25,16 @@ import {
   deleteJobWorkRecord,
   deleteProductRecord,
   deleteCategoryRecord,
+  deleteVendorRecord,
+  deletePaymentRecord,
+  deleteDispatchRecord,
+  deleteReceiptRecord,
   createVendor as createVendorRecord,
   createReceipt as createReceiptRecord,
   saveVendor,
 } from '../api/supabaseSync';
-import { clearLocalDatabase } from '../api/supabaseClient';
+import { scheduleBackup } from '../api/autoBackup';
+
 import type {
   ActivityLog,
   Category,
@@ -75,7 +80,7 @@ interface AppState {
   addToast: (message: string, type?: Toast['type']) => void;
   removeToast: (id: string) => void;
 
-  addCategory: (name: string) => void;
+  addCategory: (name: string, sharedVariantIds?: string[]) => void;
   updateCategory: (id: string, data: Partial<Category>) => void;
   deleteCategory: (id: string) => void;
 
@@ -88,6 +93,7 @@ interface AppState {
 
   addVendor: (vendor: Omit<Vendor, 'id'>) => void;
   updateVendor: (id: string, data: Partial<Vendor>) => void;
+  deleteVendor: (id: string) => void;
 
   settings: Settings;
   updateSettings: (data: Partial<Settings>) => void;
@@ -99,9 +105,9 @@ interface AppState {
   createDispatch: (data: Omit<DispatchRecord, 'id' | 'challanNumber'>) => string;
   createReceipt: (data: Omit<ReceiptRecord, 'id'>) => void;
   loadLocalData: () => Promise<void>;
-  clearAllLocalData: () => Promise<void>;
   recordPayment: (paymentId: string, amount: number) => void;
   addPayment: (payment: Omit<Payment, 'id'>) => void;
+  deletePayment: (id: string) => void;
 
   addReference: (ref: Omit<ReferenceRecord, 'id'>) => void;
   updateReference: (id: string, data: Partial<ReferenceRecord>) => void;
@@ -114,6 +120,22 @@ interface AppState {
   addInventoryStock: (data: { variantId: string; quantity: number; reference: string; transaction: string }) => void;
 
   addActivity: (entityType: string, entityId: string, message: string) => void;
+
+  // ── Referential integrity checks ─────────────────────────────────────────
+  /** Returns an array of human-readable reasons why a category cannot be deleted (empty = safe to delete) */
+  checkCategoryDeleteConstraints: (categoryId: string) => string[];
+  /** Returns an array of human-readable reasons why a product (subproduct) cannot be deleted */
+  checkProductDeleteConstraints: (productId: string) => string[];
+  /** Returns an array of human-readable reasons why a variant cannot be deleted */
+  checkVariantDeleteConstraints: (variantId: string) => string[];
+  /** Returns an array of human-readable reasons why a vendor cannot be deleted */
+  checkVendorDeleteConstraints: (vendorId: string) => string[];
+  /** Returns an array of human-readable reasons why a shared variant cannot be deleted */
+  checkSharedVariantDeleteConstraints: (svId: string) => string[];
+  /** Returns an array of human-readable reasons why a job work cannot be deleted */
+  checkJobWorkDeleteConstraints: (jobWorkId: string) => string[];
+  /** Returns an array of human-readable reasons why a reference cannot be deleted */
+  checkReferenceDeleteConstraints: (referenceId: string) => string[];
 }
 
 function generateId(prefix: string) {
@@ -253,19 +275,21 @@ export const useAppStore = create<AppState>()(
 
       removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
-      addCategory: (name) => {
+      addCategory: (name, sharedVariantIds) => {
         const cat: Category = {
           id: generateId('cat'),
           name,
           status: 'Active',
           createdDate: new Date().toISOString().slice(0, 10),
           productCount: 0,
+          sharedVariantIds: sharedVariantIds && sharedVariantIds.length > 0 ? sharedVariantIds : undefined,
         };
         set((s) => ({ categories: [cat, ...s.categories] }));
         // persist to IndexedDB
         void saveCategory(cat);
         get().addActivity('Category', cat.id, `Category "${name}" created`);
         get().addToast(`Category "${name}" added`);
+        scheduleBackup();
       },
 
       updateCategory: (id, data) => {
@@ -275,19 +299,54 @@ export const useAppStore = create<AppState>()(
         // persist updated record to IndexedDB
         const updated = get().categories.find((c) => c.id === id);
         if (updated) void saveCategory(updated);
+        scheduleBackup();
       },
 
       deleteCategory: (id) => {
         const cat = get().categories.find((c) => c.id === id);
-        // also remove all products belonging to this category
+        // Collect all products (and their variant IDs) under this category
         const relatedProducts = get().products.filter((p) => p.categoryId === id);
+        const relatedVariantIds = new Set(
+          relatedProducts.flatMap((p) => p.variants.map((v) => v.id)),
+        );
+        const relatedProductIds = new Set(relatedProducts.map((p) => p.id));
+
+        // Cascade: find orphaned dispatches and receipts referencing these variants
+        const orphanDispatches = get().dispatches.filter((d) =>
+          d.items.some((i) => relatedVariantIds.has(i.variantId)),
+        );
+        const orphanReceipts = get().receipts.filter((r) =>
+          r.items.some((i) => relatedVariantIds.has(i.variantId)),
+        );
+
+        // Cascade: find orphaned job works whose items touch these products, and their payments
+        const orphanJobWorks = get().jobWorks.filter((j) =>
+          j.items.some((i) => relatedProductIds.has(i.productId)),
+        );
+        const orphanJobWorkIds = new Set(orphanJobWorks.map((j) => j.id));
+        const orphanPayments = get().payments.filter(
+          (p) => p.jobWorkId != null && orphanJobWorkIds.has(p.jobWorkId),
+        );
+
         set((s) => ({
           categories: s.categories.filter((c) => c.id !== id),
           products: s.products.filter((p) => p.categoryId !== id),
+          dispatches: s.dispatches.filter((d) => !orphanDispatches.some((od) => od.id === d.id)),
+          receipts: s.receipts.filter((r) => !orphanReceipts.some((or) => or.id === r.id)),
+          jobWorks: s.jobWorks.filter((j) => !orphanJobWorkIds.has(j.id)),
+          payments: s.payments.filter((p) => !orphanPayments.some((op) => op.id === p.id)),
         }));
+
+        // Persist all cascaded deletes to IndexedDB
         void deleteCategoryRecord(id);
         relatedProducts.forEach((p) => void deleteProductRecord(p.id));
-        get().addToast(`Product "${cat?.name ?? ''}" deleted`);
+        orphanDispatches.forEach((d) => void deleteDispatchRecord(d.id));
+        orphanReceipts.forEach((r) => void deleteReceiptRecord(r.id));
+        orphanJobWorks.forEach((j) => void deleteJobWorkRecord(j.id));
+        orphanPayments.forEach((p) => void deletePaymentRecord(p.id));
+
+        get().addToast(`Product "${cat?.name ?? ''}" and all related data deleted`);
+        scheduleBackup();
       },
 
       addProduct: (product) => {
@@ -304,6 +363,39 @@ export const useAppStore = create<AppState>()(
         const updatedCat = get().categories.find((c) => c.id === product.categoryId);
         if (updatedCat) void saveCategory(updatedCat);
         get().addToast(`Product "${product.name}" added`);
+        scheduleBackup();
+
+        // ── Auto-attach parent category's shared variants ────────────────
+        const cat = get().categories.find((c) => c.id === product.categoryId);
+        const svIds = cat?.sharedVariantIds ?? [];
+        if (svIds.length > 0) {
+          const allSVs = get().sharedVariants;
+          const productCode = product.code ?? '';
+          setTimeout(() => {
+            // read the freshly inserted product by matching name+categoryId+code
+            const { products: storeProducts, addVariant } = useAppStore.getState();
+            const created = storeProducts.find(
+              (sp) =>
+                sp.name === product.name &&
+                sp.categoryId === product.categoryId &&
+                sp.code === productCode,
+            );
+            if (!created) return;
+            svIds.forEach((svId) => {
+              const sv = allSVs.find((s) => s.id === svId);
+              if (!sv) return;
+              addVariant(created.id, {
+                name:         sv.name,
+                sku:          productCode ? `${productCode}-${sv.sku}` : sv.sku,
+                attributes:   sv.attributes,
+                factoryStock: 0,
+                withVendor:   0,
+                rejected:     0,
+                status:       'Active' as const,
+              });
+            });
+          }, 0);
+        }
       },
 
       updateProduct: (id, data) => {
@@ -312,10 +404,30 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().products.find((p) => p.id === id);
         if (updated) void saveProduct(updated);
+        scheduleBackup();
       },
 
       deleteProduct: (id) => {
         const product = get().products.find((p) => p.id === id);
+        const variantIds = new Set(product?.variants.map((v) => v.id) ?? []);
+
+        // Cascade: dispatches and receipts touching this product's variants
+        const orphanDispatches = get().dispatches.filter((d) =>
+          d.items.some((i) => variantIds.has(i.variantId)),
+        );
+        const orphanReceipts = get().receipts.filter((r) =>
+          r.items.some((i) => variantIds.has(i.variantId)),
+        );
+
+        // Cascade: job works whose items reference this product, and their payments
+        const orphanJobWorks = get().jobWorks.filter((j) =>
+          j.items.some((i) => i.productId === id),
+        );
+        const orphanJobWorkIds = new Set(orphanJobWorks.map((j) => j.id));
+        const orphanPayments = get().payments.filter(
+          (p) => p.jobWorkId != null && orphanJobWorkIds.has(p.jobWorkId),
+        );
+
         set((s) => ({
           products: s.products.filter((p) => p.id !== id),
           categories: s.categories.map((c) =>
@@ -323,9 +435,24 @@ export const useAppStore = create<AppState>()(
               ? { ...c, productCount: Math.max(0, c.productCount - 1) }
               : c,
           ),
+          dispatches: s.dispatches.filter((d) => !orphanDispatches.some((od) => od.id === d.id)),
+          receipts: s.receipts.filter((r) => !orphanReceipts.some((or) => or.id === r.id)),
+          jobWorks: s.jobWorks.filter((j) => !orphanJobWorkIds.has(j.id)),
+          payments: s.payments.filter((p) => !orphanPayments.some((op) => op.id === p.id)),
         }));
+
         void deleteProductRecord(id);
+        orphanDispatches.forEach((d) => void deleteDispatchRecord(d.id));
+        orphanReceipts.forEach((r) => void deleteReceiptRecord(r.id));
+        orphanJobWorks.forEach((j) => void deleteJobWorkRecord(j.id));
+        orphanPayments.forEach((p) => void deletePaymentRecord(p.id));
+
+        // Persist updated category count
+        const updatedCat = get().categories.find((c) => c.id === product?.categoryId);
+        if (updatedCat) void saveCategory(updatedCat);
+
         get().addToast(`Subproduct "${product?.name ?? ''}" deleted`);
+        scheduleBackup();
       },
 
       addVariant: (productId, variant) => {
@@ -339,6 +466,7 @@ export const useAppStore = create<AppState>()(
         const updated = get().products.find((p) => p.id === productId);
         if (updated) void saveProduct(updated);
         get().addToast(`Variant "${variant.name}" added`);
+        scheduleBackup();
       },
 
       updateVariant: (productId, variantId, data) => {
@@ -353,9 +481,18 @@ export const useAppStore = create<AppState>()(
         const updated = get().products.find((p) => p.id === productId);
         if (updated) void saveProduct(updated);
         get().addToast('Variant updated');
+        scheduleBackup();
       },
 
       deleteVariant: (productId, variantId) => {
+        // Cascade: dispatches and receipts that include this specific variant
+        const orphanDispatches = get().dispatches.filter((d) =>
+          d.items.some((i) => i.variantId === variantId),
+        );
+        const orphanReceipts = get().receipts.filter((r) =>
+          r.items.some((i) => i.variantId === variantId),
+        );
+
         set((s) => ({
           products: s.products.map((p) =>
             p.id !== productId ? p : {
@@ -363,10 +500,17 @@ export const useAppStore = create<AppState>()(
               variants: p.variants.filter((v) => v.id !== variantId),
             },
           ),
+          dispatches: s.dispatches.filter((d) => !orphanDispatches.some((od) => od.id === d.id)),
+          receipts: s.receipts.filter((r) => !orphanReceipts.some((or) => or.id === r.id)),
         }));
+
         const updated = get().products.find((p) => p.id === productId);
         if (updated) void saveProduct(updated);
+        orphanDispatches.forEach((d) => void deleteDispatchRecord(d.id));
+        orphanReceipts.forEach((r) => void deleteReceiptRecord(r.id));
+
         get().addToast('Variant removed');
+        scheduleBackup();
       },
 
       addVendor: async (vendor) => {
@@ -375,6 +519,7 @@ export const useAppStore = create<AppState>()(
           if (saved) {
             set((s) => ({ vendors: [saved, ...s.vendors] }));
             get().addToast(`Vendor "${saved.name}" added`);
+            scheduleBackup();
           }
         } catch (error) {
           get().addToast('Unable to save vendor to local database', 'error');
@@ -387,6 +532,37 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().vendors.find((v) => v.id === id);
         if (updated) void saveVendor(updated);
+        scheduleBackup();
+      },
+
+      deleteVendor: (id) => {
+        const vendor = get().vendors.find((v) => v.id === id);
+
+        // Cascade: remove all job works for this vendor, and their dispatches/receipts/payments
+        const orphanJobWorks = get().jobWorks.filter((j) => j.vendorId === id);
+        const orphanJobWorkIds = new Set(orphanJobWorks.map((j) => j.id));
+        const orphanDispatches = get().dispatches.filter((d) => orphanJobWorkIds.has(d.jobWorkId));
+        const orphanReceipts = get().receipts.filter((r) => orphanJobWorkIds.has(r.jobWorkId));
+        const orphanPayments = get().payments.filter(
+          (p) => p.jobWorkId != null && orphanJobWorkIds.has(p.jobWorkId),
+        );
+
+        set((s) => ({
+          vendors: s.vendors.filter((v) => v.id !== id),
+          jobWorks: s.jobWorks.filter((j) => !orphanJobWorkIds.has(j.id)),
+          dispatches: s.dispatches.filter((d) => !orphanDispatches.some((od) => od.id === d.id)),
+          receipts: s.receipts.filter((r) => !orphanReceipts.some((or) => or.id === r.id)),
+          payments: s.payments.filter((p) => !orphanPayments.some((op) => op.id === p.id)),
+        }));
+
+        void deleteVendorRecord(id);
+        orphanJobWorks.forEach((j) => void deleteJobWorkRecord(j.id));
+        orphanDispatches.forEach((d) => void deleteDispatchRecord(d.id));
+        orphanReceipts.forEach((r) => void deleteReceiptRecord(r.id));
+        orphanPayments.forEach((p) => void deletePaymentRecord(p.id));
+
+        get().addToast(`Vendor "${vendor?.name ?? ''}" deleted`);
+        scheduleBackup();
       },
 
       // Load everything from IndexedDB into the Zustand store.
@@ -437,37 +613,6 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      clearAllLocalData: async () => {
-        localStorage.removeItem('shreenathji-portal');
-        try {
-          await clearLocalDatabase();
-        } catch (error) {
-          console.error('Unable to clear local IndexedDB database', error);
-        }
-
-        set({
-          currentUser: null,
-          connectionStatus: 'Local Server Connected',
-          users: USERS,
-          categories: [],
-          products: [],
-          vendors: [],
-          jobWorks: [],
-          dispatches: [],
-          receipts: [],
-          payments: [],
-          activityLogs: [],
-          references: [],
-          sharedVariants: [],
-          stockTransactions: [],
-          toasts: [],
-          jobCounter: 0,
-          challanCounter: 0,
-          settings: DEFAULT_SETTINGS,
-        });
-
-        get().addToast('All data cleared.', 'info');
-      },
 
       settings: DEFAULT_SETTINGS,
       updateSettings: (data) => {
@@ -490,6 +635,7 @@ export const useAppStore = create<AppState>()(
         void saveJobWork(job);
         get().addActivity('JobWork', job.id, `${get().currentUser?.name ?? 'User'} created ${jobNumber}`);
         get().addToast(`Job Work ${jobNumber} created`);
+        scheduleBackup();
         return job.id;
       },
 
@@ -503,14 +649,32 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().jobWorks.find((j) => j.id === id);
         if (updated) void saveJobWork(updated);
+        scheduleBackup();
       },
 
       deleteJobWork: (id) => {
         const job = get().jobWorks.find((j) => j.id === id);
-        set((s) => ({ jobWorks: s.jobWorks.filter((j) => j.id !== id) }));
+
+        // Cascade: remove dispatches, receipts, and payments linked to this job work
+        const orphanDispatches = get().dispatches.filter((d) => d.jobWorkId === id);
+        const orphanReceipts = get().receipts.filter((r) => r.jobWorkId === id);
+        const orphanPayments = get().payments.filter((p) => p.jobWorkId === id);
+
+        set((s) => ({
+          jobWorks: s.jobWorks.filter((j) => j.id !== id),
+          dispatches: s.dispatches.filter((d) => !orphanDispatches.some((od) => od.id === d.id)),
+          receipts: s.receipts.filter((r) => !orphanReceipts.some((or) => or.id === r.id)),
+          payments: s.payments.filter((p) => !orphanPayments.some((op) => op.id === p.id)),
+        }));
+
         void deleteJobWorkRecord(id);
+        orphanDispatches.forEach((d) => void deleteDispatchRecord(d.id));
+        orphanReceipts.forEach((r) => void deleteReceiptRecord(r.id));
+        orphanPayments.forEach((p) => void deletePaymentRecord(p.id));
+
         get().addActivity('JobWork', id, `Job Work ${job?.jobNumber ?? id} deleted`);
         get().addToast(`Job Work ${job?.jobNumber ?? ''} deleted`);
+        scheduleBackup();
       },
 
       createDispatch: (data) => {
@@ -550,6 +714,7 @@ export const useAppStore = create<AppState>()(
 
         get().addActivity('JobWork', data.jobWorkId, 'Material dispatched');
         get().addToast('Material dispatched successfully');
+        scheduleBackup();
         return dispatch.id;
       },
 
@@ -590,6 +755,7 @@ export const useAppStore = create<AppState>()(
 
           get().addActivity('JobWork', data.jobWorkId, 'Material received');
           get().addToast('Receipt confirmed successfully');
+          scheduleBackup();
         } catch (error) {
           get().addToast('Unable to save receipt to local database', 'error');
         }
@@ -607,6 +773,7 @@ export const useAppStore = create<AppState>()(
         const updated = get().payments.find((p) => p.id === paymentId);
         if (updated) void savePayment(updated);
         get().addToast('Payment recorded');
+        scheduleBackup();
       },
 
       addPayment: (payment) => {
@@ -614,6 +781,14 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ payments: [p, ...s.payments] }));
         void savePayment(p);
         get().addToast('Payment saved');
+        scheduleBackup();
+      },
+
+      deletePayment: (id) => {
+        set((s) => ({ payments: s.payments.filter((p) => p.id !== id) }));
+        void deletePaymentRecord(id);
+        get().addToast('Payment entry deleted');
+        scheduleBackup();
       },
 
       addReference: (ref) => {
@@ -626,6 +801,7 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ references: [record, ...s.references] }));
         void saveReference(record);
         get().addToast(`Reference "${ref.referenceNumber}" added`);
+        scheduleBackup();
       },
 
       updateReference: (id, data) => {
@@ -634,12 +810,36 @@ export const useAppStore = create<AppState>()(
         }));
         const updated = get().references.find((r) => r.id === id);
         if (updated) void saveReference(updated);
+        scheduleBackup();
       },
 
       deleteReference: (id) => {
+        const ref = get().references.find((r) => r.id === id);
+
+        // Unlink: clear the reference field on any job works that point to this reference number
+        if (ref) {
+          const linkedJobIds = get().jobWorks
+            .filter((j) => j.reference?.trim().toLowerCase() === ref.referenceNumber.trim().toLowerCase())
+            .map((j) => j.id);
+
+          if (linkedJobIds.length > 0) {
+            set((s) => ({
+              jobWorks: s.jobWorks.map((j) =>
+                linkedJobIds.includes(j.id) ? { ...j, reference: '' } : j,
+              ),
+            }));
+            // Persist the updated job works to IndexedDB
+            linkedJobIds.forEach((jid) => {
+              const updated = get().jobWorks.find((j) => j.id === jid);
+              if (updated) void saveJobWork(updated);
+            });
+          }
+        }
+
         set((s) => ({ references: s.references.filter((r) => r.id !== id) }));
         void deleteReferenceRecord(id);
         get().addToast('Reference deleted');
+        scheduleBackup();
       },
 
       addSharedVariant: (sv) => {
@@ -651,6 +851,7 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ sharedVariants: [record, ...s.sharedVariants] }));
         void saveSharedVariant(record);
         get().addToast(`Shared variant "${sv.name}" added`);
+        scheduleBackup();
       },
 
       updateSharedVariant: (id, data) => {
@@ -660,12 +861,14 @@ export const useAppStore = create<AppState>()(
         const updated = get().sharedVariants.find((sv) => sv.id === id);
         if (updated) void saveSharedVariant(updated);
         get().addToast('Shared variant updated');
+        scheduleBackup();
       },
 
       deleteSharedVariant: (id) => {
         set((s) => ({ sharedVariants: s.sharedVariants.filter((sv) => sv.id !== id) }));
         void deleteSharedVariantRecord(id);
         get().addToast('Shared variant deleted');
+        scheduleBackup();
       },
 
       addInventoryStock: ({ variantId, quantity, reference, transaction }) => {
@@ -717,6 +920,192 @@ export const useAppStore = create<AppState>()(
         };
         set((s) => ({ activityLogs: [log, ...s.activityLogs] }));
         void saveActivityLog(log);
+      },
+
+      // ── Referential integrity checks ──────────────────────────────────────
+
+      checkCategoryDeleteConstraints: (categoryId) => {
+        const { products, jobWorks, references, dispatches, receipts } = get();
+        const reasons: string[] = [];
+
+        // Collect all productIds under this category
+        const productIds = new Set(
+          products.filter((p) => p.categoryId === categoryId).map((p) => p.id),
+        );
+        if (productIds.size === 0) return reasons; // nothing to check
+
+        // Collect all variantIds under those products
+        const variantIds = new Set<string>();
+        products.filter((p) => productIds.has(p.id)).forEach((p) =>
+          p.variants.forEach((v) => variantIds.add(v.id)),
+        );
+
+        const activeJobCount = jobWorks.filter((j) =>
+          !['Completed', 'Cancelled', 'Draft'].includes(j.status) &&
+          j.items.some((i) => productIds.has(i.productId)),
+        ).length;
+        if (activeJobCount > 0)
+          reasons.push(`${activeJobCount} active job work${activeJobCount !== 1 ? 's' : ''} reference subproducts in this product.`);
+
+        const refCount = references.filter((r) => {
+          const items = (r.items && r.items.length > 0)
+            ? r.items
+            : [{ productId: r.productId, categoryId: r.categoryId }];
+          return items.some((i) => productIds.has(i.productId));
+        }).length;
+        if (refCount > 0)
+          reasons.push(`${refCount} reference record${refCount !== 1 ? 's' : ''} are linked to subproducts in this product.`);
+
+        const dispatchCount = dispatches.filter((d) =>
+          d.items.some((i) => variantIds.has(i.variantId)),
+        ).length;
+        if (dispatchCount > 0)
+          reasons.push(`${dispatchCount} dispatch challan${dispatchCount !== 1 ? 's' : ''} contain variants from this product.`);
+
+        const receiptCount = receipts.filter((r) =>
+          r.items.some((i) => variantIds.has(i.variantId)),
+        ).length;
+        if (receiptCount > 0)
+          reasons.push(`${receiptCount} receipt record${receiptCount !== 1 ? 's' : ''} contain variants from this product.`);
+
+        return reasons;
+      },
+
+      checkProductDeleteConstraints: (productId) => {
+        const { products, jobWorks, references, dispatches, receipts } = get();
+        const reasons: string[] = [];
+
+        const product = products.find((p) => p.id === productId);
+        const variantIds = new Set(product?.variants.map((v) => v.id) ?? []);
+
+        const activeJobCount = jobWorks.filter((j) =>
+          !['Completed', 'Cancelled', 'Draft'].includes(j.status) &&
+          j.items.some((i) => i.productId === productId),
+        ).length;
+        if (activeJobCount > 0)
+          reasons.push(`${activeJobCount} active job work${activeJobCount !== 1 ? 's' : ''} reference this subproduct.`);
+
+        const refCount = references.filter((r) => {
+          const items = (r.items && r.items.length > 0)
+            ? r.items
+            : [{ productId: r.productId, categoryId: r.categoryId }];
+          return items.some((i) => i.productId === productId);
+        }).length;
+        if (refCount > 0)
+          reasons.push(`${refCount} reference record${refCount !== 1 ? 's' : ''} are linked to this subproduct.`);
+
+        const dispatchCount = dispatches.filter((d) =>
+          d.items.some((i) => variantIds.has(i.variantId)),
+        ).length;
+        if (dispatchCount > 0)
+          reasons.push(`${dispatchCount} dispatch challan${dispatchCount !== 1 ? 's' : ''} contain variants of this subproduct.`);
+
+        const receiptCount = receipts.filter((r) =>
+          r.items.some((i) => variantIds.has(i.variantId)),
+        ).length;
+        if (receiptCount > 0)
+          reasons.push(`${receiptCount} receipt record${receiptCount !== 1 ? 's' : ''} contain variants of this subproduct.`);
+
+        return reasons;
+      },
+
+      checkVariantDeleteConstraints: (variantId) => {
+        const { jobWorks, dispatches, receipts } = get();
+        const reasons: string[] = [];
+
+        const activeJobCount = jobWorks.filter((j) =>
+          !['Completed', 'Cancelled'].includes(j.status) &&
+          j.items.some((i) => i.variantId === variantId),
+        ).length;
+        if (activeJobCount > 0)
+          reasons.push(`${activeJobCount} active job work${activeJobCount !== 1 ? 's' : ''} include this variant.`);
+
+        const dispatchCount = dispatches.filter((d) =>
+          d.items.some((i) => i.variantId === variantId),
+        ).length;
+        if (dispatchCount > 0)
+          reasons.push(`${dispatchCount} dispatch challan${dispatchCount !== 1 ? 's' : ''} include this variant.`);
+
+        const receiptCount = receipts.filter((r) =>
+          r.items.some((i) => i.variantId === variantId),
+        ).length;
+        if (receiptCount > 0)
+          reasons.push(`${receiptCount} receipt record${receiptCount !== 1 ? 's' : ''} include this variant.`);
+
+        return reasons;
+      },
+
+      checkVendorDeleteConstraints: (vendorId) => {
+        const { jobWorks, payments } = get();
+        const reasons: string[] = [];
+
+        const activeJobCount = jobWorks.filter((j) =>
+          j.vendorId === vendorId && !['Completed', 'Cancelled', 'Draft'].includes(j.status),
+        ).length;
+        if (activeJobCount > 0)
+          reasons.push(`${activeJobCount} active job work${activeJobCount !== 1 ? 's' : ''} are assigned to this vendor.`);
+
+        const allJobCount = jobWorks.filter((j) => j.vendorId === vendorId).length;
+        if (allJobCount > 0 && activeJobCount === 0)
+          reasons.push(`${allJobCount} completed/draft job work${allJobCount !== 1 ? 's' : ''} are linked to this vendor.`);
+
+        const paymentCount = payments.filter((p) => p.vendorId === vendorId).length;
+        if (paymentCount > 0)
+          reasons.push(`${paymentCount} payment record${paymentCount !== 1 ? 's' : ''} are linked to this vendor.`);
+
+        return reasons;
+      },
+
+      checkSharedVariantDeleteConstraints: (svId) => {
+        const { categories } = get();
+        const reasons: string[] = [];
+
+        const inheritingCats = categories.filter((c) =>
+          c.sharedVariantIds?.includes(svId),
+        );
+        if (inheritingCats.length > 0) {
+          const names = inheritingCats.map((c) => `"${c.name}"`).join(', ');
+          reasons.push(
+            `${inheritingCats.length} product${inheritingCats.length !== 1 ? 's' : ''} inherit this variant: ${names}.`,
+          );
+        }
+
+        return reasons;
+      },
+
+      checkJobWorkDeleteConstraints: (jobWorkId) => {
+        const { dispatches, receipts, payments } = get();
+        const reasons: string[] = [];
+
+        const dispatchCount = dispatches.filter((d) => d.jobWorkId === jobWorkId).length;
+        if (dispatchCount > 0)
+          reasons.push(`${dispatchCount} dispatch challan${dispatchCount !== 1 ? 's' : ''} are linked to this job work.`);
+
+        const receiptCount = receipts.filter((r) => r.jobWorkId === jobWorkId).length;
+        if (receiptCount > 0)
+          reasons.push(`${receiptCount} receipt record${receiptCount !== 1 ? 's' : ''} are linked to this job work.`);
+
+        const paymentCount = payments.filter((p) => p.jobWorkId === jobWorkId).length;
+        if (paymentCount > 0)
+          reasons.push(`${paymentCount} payment record${paymentCount !== 1 ? 's' : ''} are linked to this job work.`);
+
+        return reasons;
+      },
+
+      checkReferenceDeleteConstraints: (referenceId) => {
+        const { references, jobWorks } = get();
+        const reasons: string[] = [];
+
+        const ref = references.find((r) => r.id === referenceId);
+        if (!ref) return reasons;
+
+        const linkedJobCount = jobWorks.filter(
+          (j) => j.reference?.trim().toLowerCase() === ref.referenceNumber.trim().toLowerCase(),
+        ).length;
+        if (linkedJobCount > 0)
+          reasons.push(`${linkedJobCount} job work${linkedJobCount !== 1 ? 's' : ''} use this reference number.`);
+
+        return reasons;
       },
     }),
     {

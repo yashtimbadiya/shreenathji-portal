@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
-import { Modal, ConfirmDialog } from '../components/ui/Modal';
+import { Modal, ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { getCategoryById } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import type { ProductVariant } from '../types';
@@ -19,14 +19,17 @@ interface VariantRowProps {
   unit: string;
   onSave: (data: Pick<ProductVariant, 'name' | 'sku' | 'status'>) => void;
   onDelete: () => void;
+  /** Pre-computed blocking reasons — if non-empty, delete is blocked */
+  deleteBlockReasons: string[];
 }
 
-function VariantRow({ variant, unit, onSave, onDelete }: VariantRowProps) {
+function VariantRow({ variant, unit, onSave, onDelete, deleteBlockReasons }: VariantRowProps) {
   const [editing,  setEditing]  = useState(false);
   const [name,     setName]     = useState(variant.name);
   const [sku,      setSku]      = useState(variant.sku);
   const [status,   setStatus]   = useState<'Active' | 'Disabled'>(variant.status);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [blockedDelete, setBlockedDelete] = useState(false);
 
   const total = variant.factoryStock + variant.withVendor;
 
@@ -153,7 +156,7 @@ function VariantRow({ variant, unit, onSave, onDelete }: VariantRowProps) {
             </button>
             <button
               type="button"
-              onClick={() => setConfirmDelete(true)}
+              onClick={() => deleteBlockReasons.length > 0 ? setBlockedDelete(true) : setConfirmDelete(true)}
               className="p-1.5 rounded-lg text-muted hover:text-red-500 hover:bg-red-50 transition-colors"
               title="Delete variant"
             >
@@ -170,6 +173,13 @@ function VariantRow({ variant, unit, onSave, onDelete }: VariantRowProps) {
         message={`Delete variant "${variant.name}" (${variant.sku})? This cannot be undone.`}
         confirmLabel="Delete"
         danger
+      />
+      <BlockedDeleteDialog
+        open={blockedDelete}
+        onClose={() => setBlockedDelete(false)}
+        title="Cannot Delete Variant"
+        entityName={variant.name}
+        reasons={deleteBlockReasons}
       />
     </>
   );
@@ -188,6 +198,7 @@ export function ProductDetailPage() {
   const updateVariant   = useAppStore((s) => s.updateVariant);
   const deleteVariant   = useAppStore((s) => s.deleteVariant);
   const updateProduct   = useAppStore((s) => s.updateProduct);
+  const checkVariantDeleteConstraints = useAppStore((s) => s.checkVariantDeleteConstraints);
 
   // Add-variant modal
   const [showAddModal,  setShowAddModal]  = useState(false);
@@ -338,6 +349,7 @@ export function ProductDetailPage() {
                   unit={product.unit}
                   onSave={(data) => updateVariant(product.id, v.id, data)}
                   onDelete={() => deleteVariant(product.id, v.id)}
+                  deleteBlockReasons={checkVariantDeleteConstraints(v.id)}
                 />
               ))}
             </tbody>

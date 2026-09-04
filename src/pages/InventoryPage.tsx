@@ -7,6 +7,8 @@ import { Card, PageHeader } from '../components/ui/Card';
 import { Input, Select } from '../components/ui/Input';
 import { getCategoryById } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
 export function InventoryPage() {
   const products = useAppStore((s) => s.products);
@@ -15,6 +17,10 @@ export function InventoryPage() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [productFilter, setProductFilter] = useState(searchParams.get('product') ?? '');
   const [search, setSearch] = useState('');
+  const navigate = useNavigate();
+
+  // N → navigate to Add Inventory page
+  useNewItemShortcut(() => navigate('/inventory/new'));
 
   const rows = useMemo(() => {
     const result: {
@@ -125,6 +131,9 @@ export function AddInventoryPage() {
   const [quantity, setQuantity] = useState('');
   const [reference, setReference] = useState('');
   const [transaction, setTransaction] = useState('Stock Add');
+
+  // ESC → cancel / go back
+  useEscapeBack(() => navigate('/inventory'));
 
   const variantOptions = products.flatMap((product) =>
     product.variants.map((variant) => ({
