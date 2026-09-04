@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
 import { Input, Select } from '../components/ui/Input';
+import { BlockedDeleteDialog, ConfirmDialog } from '../components/ui/Modal';
 import { useAppStore } from '../store/useAppStore';
 import { formatCurrency, formatDate } from '../data/mockData';
+import type { Payment } from '../types';
+import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
 const STATUS_TABS = [
   { key: 'all', label: 'All' },
@@ -28,8 +31,10 @@ export function PaymentsPage() {
   const vendors    = useAppStore((s) => s.vendors);
   const jobWorks   = useAppStore((s) => s.jobWorks);
   const addPayment = useAppStore((s) => s.addPayment);
+  const deletePayment = useAppStore((s) => s.deletePayment);
 
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [deleteTarget, setDeleteTarget] = useState<(Payment & { derivedStatus: string; totalPaid: number; totalBill: number }) | null>(null);
 
   // Modal state
   const [modalJobId, setModalJobId] = useState<string | null>(null);
@@ -117,6 +122,13 @@ export function PaymentsPage() {
   };
 
   const closeModal = () => setModalJobId(null);
+
+  // N → open payment modal for the first unpaid job (no-op if modal already open)
+  useNewItemShortcut(() => {
+    if (modalJobId) return;
+    const first = unpaidJobs[0];
+    if (first) openModal(first.id);
+  });
 
   const handleRecordPayment = () => {
     if (!modalJob || !payAmtNum) return;
@@ -262,14 +274,35 @@ export function PaymentsPage() {
                     </td>
                     <td className="px-4 py-3">
                       {payment.derivedStatus !== 'Paid' ? (
-                        <button
-                          onClick={() => openModal(payment.jobWorkId)}
-                          className="text-xs font-medium text-brand hover:underline"
-                        >
-                          Record Payment
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openModal(payment.jobWorkId)}
+                            className="text-xs font-medium text-brand hover:underline"
+                          >
+                            Record Payment
+                          </button>
+                          <button
+                            type="button"
+                            title="Delete this payment entry"
+                            onClick={() => setDeleteTarget(payment)}
+                            className="p-1 rounded text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       ) : (
-                        <span className="text-xs text-success font-medium">✓ Settled</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-success font-medium">✓ Settled</span>
+                          {/* Trash icon opens blocked dialog — fully paid entries cannot be deleted */}
+                          <button
+                            type="button"
+                            title="Cannot delete — job is fully paid"
+                            onClick={() => setDeleteTarget(payment)}
+                            className="p-1 rounded text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -381,6 +414,31 @@ export function PaymentsPage() {
           </div>
         </div>
       )}
+
+      {/* ── Delete payment dialogs ── */}
+      {/* Blocked: job is fully paid — deleting would revert settled status */}
+      <BlockedDeleteDialog
+        open={deleteTarget !== null && deleteTarget.derivedStatus === 'Paid'}
+        onClose={() => setDeleteTarget(null)}
+        title="Cannot Delete Payment Entry"
+        entityName={`${deleteTarget?.paymentType ?? ''} payment of ${deleteTarget ? formatCurrency(deleteTarget.paid) : ''}`}
+        reasons={[
+          `This job (${jobWorks.find((j) => j.id === deleteTarget?.jobWorkId)?.jobNumber ?? ''}) is fully settled — total paid ${formatCurrency(deleteTarget?.totalPaid ?? 0)} covers the full bill of ${formatCurrency(deleteTarget?.totalBill ?? 0)}.`,
+          'Deleting this entry would revert the job to a partial/unpaid state.',
+          'To correct a payment, add a new entry with the adjusted amount instead.',
+        ]}
+      />
+
+      {/* Allowed: job is not fully paid — safe to delete this entry */}
+      <ConfirmDialog
+        open={deleteTarget !== null && deleteTarget.derivedStatus !== 'Paid'}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => { if (deleteTarget) deletePayment(deleteTarget.id); }}
+        title="Delete Payment Entry"
+        message={`Delete this ${deleteTarget?.paymentType ?? ''} payment of ${deleteTarget ? formatCurrency(deleteTarget.paid) : ''}? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+      />
     </div>
   );
 }

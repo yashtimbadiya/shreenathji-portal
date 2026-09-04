@@ -87,7 +87,34 @@ export function ChallanDetailPage() {
   return (
     <div>
       {/* Print CSS */}
-      <style>{`@media print { @page { size: A5 landscape; margin: 8mm; } .no-print { display: none !important; } }`}</style>
+      <style>{`
+        @media print {
+          @page {
+            size: A5 landscape;
+            margin: 8mm;
+          }
+          .no-print { display: none !important; }
+          body, html {
+            margin: 0 !important;
+            padding: 0 !important;
+            visibility: hidden;
+          }
+          .challan-print-card {
+            visibility: visible !important;
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 8mm !important;
+            box-shadow: none !important;
+            border: none !important;
+            overflow: visible !important;
+            background: white !important;
+          }
+          .challan-print-card * { visibility: visible !important; }
+        }
+      `}</style>
 
       {/* Screen-only action bar */}
       <div className="no-print mb-4 flex items-center gap-4">
@@ -100,7 +127,7 @@ export function ChallanDetailPage() {
       </div>
 
       {/* A5 Challan Card */}
-      <Card className="max-w-2xl mx-auto p-6 print:shadow-none print:border-0 print:p-0 print:max-w-none">
+      <Card className="challan-print-card max-w-2xl mx-auto p-6 print:shadow-none print:border-0 print:p-0 print:max-w-none print:mx-0">
 
         {/* Header: two-column */}
         <div className="flex items-start justify-between border-b-2 border-brand pb-3 mb-4">
