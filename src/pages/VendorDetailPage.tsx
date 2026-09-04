@@ -5,6 +5,7 @@ import { Card, KPICard } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatCurrency, formatDate, formatQty } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import type { DispatchRecord } from '../types';
 
 const TABS = ['Overview', 'Job Works', 'Material Ledger', 'Payments', 'Documents'];
 
@@ -12,6 +13,7 @@ export function VendorDetailPage() {
   const { id } = useParams();
   const vendors = useAppStore((s) => s.vendors);
   const jobWorks = useAppStore((s) => s.jobWorks);
+  const dispatches = useAppStore((s) => s.dispatches);
   const products = useAppStore((s) => s.products);
   const payments = useAppStore((s) => s.payments);
   const [activeTab, setActiveTab] = useState('Overview');
@@ -28,6 +30,12 @@ export function VendorDetailPage() {
   );
 
   const vendorJobs = jobWorks.filter((j) => j.vendorId === vendor.id);
+
+  /** Map from jobWorkId → list of dispatch records (challans) for that job */
+  const challansByJob = vendorJobs.reduce<Record<string, DispatchRecord[]>>((acc, job) => {
+    acc[job.id] = dispatches.filter((d) => d.jobWorkId === job.id);
+    return acc;
+  }, {});
   const materialSent = vendorJobs.reduce((sum, job) => sum + getJobSentTotal(job), 0);
   const materialReceived = vendorJobs.reduce((sum, job) => sum + getJobReceivedTotal(job), 0);
   const materialPending = vendorJobs.reduce((sum, job) => sum + getJobPendingTotal(job), 0);
@@ -72,7 +80,7 @@ export function VendorDetailPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface">
-                  {['Date', 'Job Number', 'Product', 'Variant', 'Sent', 'Received', 'Pending', 'Due Date', 'Status'].map((h) => (
+                  {['Date', 'Job Number', 'Challan No.', 'Product', 'Variant', 'Sent', 'Received', 'Pending', 'Due Date', 'Status'].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                   ))}
                 </tr>
@@ -82,11 +90,30 @@ export function VendorDetailPage() {
                   const item = job.items[0];
                   const product = item ? getProductById(item.productId) : null;
                   const variant = product?.variants.find((v) => v.id === item?.variantId);
+                  const jobChallans = challansByJob[job.id] ?? [];
                   return (
                     <tr key={job.id} className="border-b border-border">
                       <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                       <td className="px-4 py-3">
                         <Link to={`/job-works/${job.id}`} className="text-brand hover:underline">{job.jobNumber}</Link>
+                      </td>
+                      {/* Challan No. — may be multiple challans per job */}
+                      <td className="px-4 py-3">
+                        {jobChallans.length === 0 ? (
+                          <span className="text-muted">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {jobChallans.map((ch) => (
+                              <Link
+                                key={ch.id}
+                                to={`/challans/${ch.id}`}
+                                className="inline-block font-mono text-xs font-semibold text-brand hover:underline bg-brand/5 border border-brand/20 rounded px-1.5 py-0.5 transition-colors hover:bg-brand/10"
+                              >
+                                {ch.challanNumber}
+                              </Link>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">{product?.name}</td>
                       <td className="px-4 py-3">{variant?.name}</td>

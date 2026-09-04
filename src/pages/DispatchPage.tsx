@@ -6,6 +6,7 @@ import { Input, SearchableSelect, Textarea } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { formatQty } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
 
 export function DispatchPage() {
   const [searchParams] = useSearchParams();
@@ -24,6 +25,9 @@ export function DispatchPage() {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [showSuccess, setShowSuccess] = useState(false);
   const [lastDispatchId, setLastDispatchId] = useState('');
+
+  // ESC → go back
+  useEscapeBack(() => navigate(-1));
 
   const job = jobWorks.find((j) => j.id === jobId);
 
@@ -185,6 +189,7 @@ export function DispatchPage() {
 }
 
 export function DispatchHistoryPage() {
+  const navigate = useNavigate();
   const dispatches = useAppStore((s) => s.dispatches);
   const jobWorks = useAppStore((s) => s.jobWorks);
 
@@ -213,7 +218,7 @@ export function DispatchHistoryPage() {
                     <td className="px-4 py-3">{d.driver}</td>
                     <td className="px-4 py-3">{d.transport}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => window.location.href = `/challans/${d.id}`} className="text-xs text-brand hover:underline">View Challan</button>
+                      <button onClick={() => navigate(`/challans/${d.id}`)} className="text-xs text-brand hover:underline">View Challan</button>
                     </td>
                   </tr>
                 );

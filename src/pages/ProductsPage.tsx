@@ -178,15 +178,17 @@ export function AddProductPage() {
   const [code,       setCode]       = useState('');
   const [unit,       setUnit]       = useState('Pic');
   const [rate,       setRate]       = useState('');
+  const [submitted,  setSubmitted]  = useState(false);
 
   const returnTo = searchParams.get('returnTo') ?? '/products';
 
   const submitRef = useRef<HTMLButtonElement>(null);
-  const canSave   = !!name && !!categoryId;
 
-  // Show which shared variants will be auto-inherited from the selected category
-  const selectedCategory = categories.find((c) => c.id === categoryId);
-  const inheritedSvCount = selectedCategory?.sharedVariantIds?.length ?? 0;
+  // Validation: name + category required; selected category must have ≥1 shared variant
+  const selectedCategory  = categories.find((c) => c.id === categoryId);
+  const inheritedSvCount  = selectedCategory?.sharedVariantIds?.length ?? 0;
+  const categoryHasSvs    = inheritedSvCount > 0;
+  const canSave           = !!name && !!categoryId && categoryHasSvs;
 
   // ESC → cancel / go back
   useEscapeBack(() => navigate(returnTo));
@@ -197,7 +199,7 @@ export function AddProductPage() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         if (canSave) submitRef.current?.click();
-        else submitRef.current?.focus();
+        else { setSubmitted(true); submitRef.current?.focus(); }
       }
     };
     window.addEventListener('keydown', handler);
@@ -206,7 +208,8 @@ export function AddProductPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !categoryId) return;
+    setSubmitted(true);
+    if (!canSave) return;
 
     // addProduct in the store auto-attaches the parent category's sharedVariantIds as variants
     addProduct({
@@ -251,26 +254,46 @@ export function AddProductPage() {
           <SearchableSelect
             label="Product *"
             value={categoryId}
-            onChange={setCategoryId}
+            onChange={(v) => { setCategoryId(v); setSubmitted(false); }}
             placeholder="Search product..."
             options={categories.map((c) => ({ value: c.id, label: c.name }))}
             onAddNew={() => navigate(`/categories/new?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}
             addNewLabel="Add new product"
           />
 
-          {/* Inherited variants info banner */}
+          {/* Inherited variants status banner */}
           {categoryId && (
-            <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs ${
-              inheritedSvCount > 0
-                ? 'bg-green-50 border-green-200 text-green-700'
-                : 'bg-surface border-border text-muted'
-            }`}>
-              <Link2 size={13} className="shrink-0 mt-0.5" />
-              {inheritedSvCount > 0
-                ? <span><strong>{inheritedSvCount} shared variant{inheritedSvCount !== 1 ? 's' : ''}</strong> from "{selectedCategory?.name}" will be automatically added to this subproduct.</span>
-                : <span>The selected product has no inherited shared variants. You can add variants manually after saving.</span>
-              }
-            </div>
+            <>
+              {categoryHasSvs ? (
+                <div className="flex items-start gap-2.5 rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 text-xs text-green-700">
+                  <Link2 size={13} className="shrink-0 mt-0.5" />
+                  <span>
+                    <strong>{inheritedSvCount} shared variant{inheritedSvCount !== 1 ? 's' : ''}</strong> from "{selectedCategory?.name}" will be automatically added to this subproduct.
+                  </span>
+                </div>
+              ) : (
+                <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-xs ${
+                  submitted ? 'border-red-300 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-700'
+                }`}>
+                  <Link2 size={13} className="shrink-0 mt-0.5" />
+                  <span className="flex-1">
+                    <strong>"{selectedCategory?.name}" has no shared variants.</strong>{' '}
+                    At least one shared variant is required.{' '}
+                    <Link
+                      to={`/categories/${categoryId}/edit?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+                      className="underline font-semibold hover:opacity-80"
+                    >
+                      Configure shared variants →
+                    </Link>
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Prompt if submitted without selecting a category */}
+          {submitted && !categoryId && (
+            <p className="text-xs text-red-600">Please select a product.</p>
           )}
 
           <Input
@@ -304,7 +327,7 @@ export function AddProductPage() {
 
         {/* ── Actions ── */}
         <div className="mt-6 flex gap-3">
-          <Button ref={submitRef} type="submit" disabled={!canSave}>
+          <Button ref={submitRef} type="submit" disabled={submitted && !canSave}>
             Save Subproduct
             {canSave && (
               <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>

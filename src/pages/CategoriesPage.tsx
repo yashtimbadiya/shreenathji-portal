@@ -1,6 +1,6 @@
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Check, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEscapeBack } from '../hooks/useEscapeBack';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 import { Button } from '../components/ui/Button';
@@ -142,16 +142,26 @@ interface SharedVariantPanelProps {
   firstCheckboxRef: React.RefObject<HTMLInputElement | null>;
   /** Ref to the save button — Enter on last checkbox lands here */
   saveBtnRef: React.RefObject<HTMLButtonElement | null>;
+  /** When true the panel shows a red validation border if nothing is selected */
+  required?: boolean;
 }
 
-function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtnRef }: SharedVariantPanelProps) {
-  const navigate       = useNavigate();
-  const sharedVariants = useAppStore((s) => s.sharedVariants);
+function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtnRef, required }: SharedVariantPanelProps) {
+  const sharedVariants      = useAppStore((s) => s.sharedVariants);
+  const addSharedVariant    = useAppStore((s) => s.addSharedVariant);
+  const updateSharedVariant = useAppStore((s) => s.updateSharedVariant);
+
+  const [showAddForm,  setShowAddForm]  = useState(false);
+  const [editingId,    setEditingId]    = useState<string | null>(null);
+  const [newSvName,    setNewSvName]    = useState('');
+  const [editSvName,   setEditSvName]   = useState('');
 
   const activeSharedVariants = useMemo(
     () => sharedVariants.filter((sv) => sv.status === 'Active'),
     [sharedVariants],
   );
+
+  const showError = required && selectedSvIds.length === 0;
 
   const toggle = (id: string) =>
     onChange(
@@ -160,25 +170,109 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
         : [...selectedSvIds, id],
     );
 
+  const handleAddSv = () => {
+    const trimmed = newSvName.trim();
+    if (!trimmed) return;
+    addSharedVariant({
+      name:       trimmed,
+      sku:        trimmed.toUpperCase().replace(/\s+/g, '-'),
+      attributes: [],
+      status:     'Active',
+    });
+    setNewSvName('');
+    setShowAddForm(false);
+  };
+
+  const handleUpdateSv = (id: string) => {
+    const trimmed = editSvName.trim();
+    if (!trimmed) return;
+    updateSharedVariant(id, {
+      name: trimmed,
+      sku:  trimmed.toUpperCase().replace(/\s+/g, '-'),
+    });
+    setEditingId(null);
+    setEditSvName('');
+  };
+
+  const startEdit = (sv: { id: string; name: string }) => {
+    setEditingId(sv.id);
+    setEditSvName(sv.name);
+    setShowAddForm(false);
+  };
+
   return (
-    <Card className="p-6">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-brand font-bold text-base">⬡</span>
-        <h3 className="text-base font-semibold">Inherited Variants</h3>
+    <Card className={`p-6 ${showError ? 'ring-2 ring-red-400 border-red-300' : ''}`}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span className="text-brand font-bold text-base">⬡</span>
+          <h3 className="text-base font-semibold">
+            Inherited Variants{required && <span className="text-red-500 ml-0.5">*</span>}
+          </h3>
+        </div>
+        {!showAddForm && editingId === null && (
+          <button
+            type="button"
+            onClick={() => setShowAddForm(true)}
+            className="inline-flex items-center gap-1 text-xs text-brand hover:underline font-medium"
+          >
+            <Plus size={12} /> New variant
+          </button>
+        )}
       </div>
-      <p className="text-xs text-muted mb-4">
+      <p className="text-xs text-muted mb-3">
         Every sub-product under this product will automatically get these shared variants.
       </p>
 
-      {activeSharedVariants.length === 0 ? (
+      {showError && (
+        <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          At least one shared variant must be selected.
+        </p>
+      )}
+
+      {/* ── Inline Add form ── */}
+      {showAddForm && (
+        <div className="mb-3 rounded-lg border-2 border-brand/30 bg-brand/5 p-3 space-y-2">
+          <p className="text-xs font-semibold text-charcoal">New Shared Variant</p>
+          <input
+            autoFocus
+            value={newSvName}
+            onChange={(e) => setNewSvName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); handleAddSv(); }
+              if (e.key === 'Escape') { setShowAddForm(false); setNewSvName(''); }
+            }}
+            placeholder="e.g. M, L, Red, 25mm"
+            className="w-full px-2.5 py-1.5 rounded-lg border border-brand/40 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleAddSv}
+              disabled={!newSvName.trim()}
+              className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand/90 disabled:opacity-50"
+            >
+              <Check size={12} /> Add
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowAddForm(false); setNewSvName(''); }}
+              className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:bg-surface"
+            >
+              <X size={12} /> Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeSharedVariants.length === 0 && !showAddForm ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center text-sm text-muted">
           <p>No shared variants in the library yet.</p>
           <button
             type="button"
-            onClick={() => navigate('/shared-variants')}
+            onClick={() => setShowAddForm(true)}
             className="text-brand hover:underline text-xs mt-1"
           >
-            Go create some →
+            Create one now →
           </button>
         </div>
       ) : (
@@ -186,10 +280,47 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
           {activeSharedVariants.map((sv, idx) => {
             const checked = selectedSvIds.includes(sv.id);
             const isLast  = idx === activeSharedVariants.length - 1;
+            const isEditing = editingId === sv.id;
+
+            if (isEditing) {
+              return (
+                <div key={sv.id} className="rounded-lg border-2 border-brand/30 bg-brand/5 px-3 py-2.5 space-y-2">
+                  <p className="text-xs font-semibold text-charcoal">Edit Shared Variant</p>
+                  <input
+                    autoFocus
+                    value={editSvName}
+                    onChange={(e) => setEditSvName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleUpdateSv(sv.id); }
+                      if (e.key === 'Escape') { setEditingId(null); setEditSvName(''); }
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-brand/40 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateSv(sv.id)}
+                      disabled={!editSvName.trim()}
+                      className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:bg-brand/90 disabled:opacity-50"
+                    >
+                      <Save size={12} /> Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingId(null); setEditSvName(''); }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:bg-surface"
+                    >
+                      <X size={12} /> Cancel
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <label
                 key={sv.id}
-                className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${
+                className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors group ${
                   checked ? 'border-brand/40 bg-brand/5' : 'border-border hover:bg-surface'
                 }`}
               >
@@ -202,7 +333,6 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       toggle(sv.id);
-                      // Last variant → move focus to Save button
                       if (isLast) {
                         saveBtnRef.current?.focus();
                       } else {
@@ -210,11 +340,18 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
                       }
                     }
                   }}
-                  className="mt-0.5 accent-brand shrink-0"
+                  className="accent-brand shrink-0"
                 />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-charcoal">{sv.name}</p>
-                </div>
+                <span className="flex-1 text-sm font-medium text-charcoal">{sv.name}</span>
+                {/* Edit button — only visible on hover */}
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); startEdit(sv); }}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted hover:text-brand transition-opacity"
+                  title="Edit variant name"
+                >
+                  <Pencil size={11} />
+                </button>
               </label>
             );
           })}
@@ -237,10 +374,13 @@ export function AddCategoryPage() {
 
   const [name,          setName]          = useState('');
   const [selectedSvIds, setSelectedSvIds] = useState<string[]>([]);
+  const [submitted,     setSubmitted]     = useState(false);
 
   const returnTo         = new URLSearchParams(window.location.search).get('returnTo') ?? '/categories';
   const firstCheckboxRef = useRef<HTMLInputElement>(null);
   const saveBtnRef       = useRef<HTMLButtonElement>(null);
+
+  const canSave = !!name.trim() && selectedSvIds.length > 0;
 
   useEscapeBack(() => navigate(returnTo));
 
@@ -249,17 +389,18 @@ export function AddCategoryPage() {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        if (name.trim()) saveBtnRef.current?.click();
-        else saveBtnRef.current?.focus();
+        if (canSave) saveBtnRef.current?.click();
+        else { setSubmitted(true); saveBtnRef.current?.focus(); }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [name]);
+  }, [canSave]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    setSubmitted(true);
+    if (!canSave) return;
     addCategory(name.trim(), selectedSvIds);
     navigate(returnTo);
   };
@@ -297,15 +438,14 @@ export function AddCategoryPage() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      // Jump to first shared variant checkbox (or save if none)
                       firstCheckboxRef.current ? firstCheckboxRef.current.focus() : saveBtnRef.current?.focus();
                     }
                   }}
                 />
                 <div className="flex gap-3 pt-2">
-                  <Button ref={saveBtnRef} type="submit" disabled={!name.trim()}>
+                  <Button ref={saveBtnRef} type="submit" disabled={submitted && !canSave}>
                     Save Product
-                    {name.trim() && (
+                    {canSave && (
                       <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
                     )}
                   </Button>
@@ -322,6 +462,140 @@ export function AddCategoryPage() {
               onChange={setSelectedSvIds}
               firstCheckboxRef={firstCheckboxRef}
               saveBtnRef={saveBtnRef}
+              required={submitted}
+            />
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─── Edit Product (Category) page ────────────────────────────────────────────
+export function EditCategoryPage() {
+  const { id }           = useParams<{ id: string }>();
+  const navigate         = useNavigate();
+  const categories       = useAppStore((s) => s.categories);
+  const updateCategory   = useAppStore((s) => s.updateCategory);
+
+  const category = categories.find((c) => c.id === id);
+
+  const [name,          setName]          = useState(category?.name ?? '');
+  const [selectedSvIds, setSelectedSvIds] = useState<string[]>(category?.sharedVariantIds ?? []);
+  const [submitted,     setSubmitted]     = useState(false);
+
+  const firstCheckboxRef = useRef<HTMLInputElement>(null);
+  const saveBtnRef       = useRef<HTMLButtonElement>(null);
+
+  const canSave = !!name.trim() && selectedSvIds.length > 0;
+
+  useEscapeBack(() => navigate('/categories'));
+
+  // Ctrl+Enter → save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (canSave) saveBtnRef.current?.click();
+        else { setSubmitted(true); saveBtnRef.current?.focus(); }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [canSave]);
+
+  if (!category) {
+    return (
+      <div className="text-center py-16 text-muted">
+        Product not found.{' '}
+        <Link to="/categories" className="text-brand hover:underline">Back to products</Link>
+      </div>
+    );
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitted(true);
+    if (!canSave) return;
+    updateCategory(category.id, {
+      name:             name.trim(),
+      sharedVariantIds: selectedSvIds,
+    });
+    navigate('/categories');
+  };
+
+  return (
+    <div>
+      <PageHeader
+        title={`Edit Product — ${category.name}`}
+        subtitle="Update the product name and the shared variants every sub-product will inherit."
+      />
+
+      {/* Keyboard hint */}
+      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-700">
+        <span className="font-semibold">⌨ Keyboard Mode</span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on name → move to variants</span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> on variant → toggle &amp; move</span>
+        <span className="text-blue-500">·</span>
+        <span className="font-semibold text-blue-800">
+          <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> — Save Changes
+        </span>
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-3xl" data-form>
+          {/* ── Product name + actions ── */}
+          <div className="lg:col-span-2">
+            <Card className="p-6">
+              <div className="space-y-4">
+                <Input
+                  label="Product Name *"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Elastic"
+                  required
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      firstCheckboxRef.current ? firstCheckboxRef.current.focus() : saveBtnRef.current?.focus();
+                    }
+                  }}
+                />
+
+                {/* Status info (read-only — status is managed separately) */}
+                <div className="flex items-center gap-2 text-xs text-muted">
+                  <span>Status:</span>
+                  <ActiveBadge active={category.status === 'Active'} />
+                  <span className="text-border">·</span>
+                  <span>{category.productCount} subproduct{category.productCount !== 1 ? 's' : ''}</span>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <Button ref={saveBtnRef} type="submit" disabled={submitted && !canSave}>
+                    Save Changes
+                    {canSave && (
+                      <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
+                    )}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => navigate('/categories')}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* ── Shared Variants ── */}
+          <div>
+            <SharedVariantPanel
+              selectedSvIds={selectedSvIds}
+              onChange={setSelectedSvIds}
+              firstCheckboxRef={firstCheckboxRef}
+              saveBtnRef={saveBtnRef}
+              required={submitted}
             />
           </div>
         </div>

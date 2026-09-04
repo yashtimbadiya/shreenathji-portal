@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
-import { AddCategoryPage, CategoriesPage } from './pages/CategoriesPage';
+import { AddCategoryPage, CategoriesPage, EditCategoryPage } from './pages/CategoriesPage';
 import { ChallansPage, ChallanDetailPage } from './pages/ChallanPage';
 import { CreateJobWorkPage } from './pages/CreateJobWorkPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -27,6 +27,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="categories" element={<CategoriesPage />} />
         <Route path="categories/new" element={<AddCategoryPage />} />
+        <Route path="categories/:id/edit" element={<EditCategoryPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route path="products/new" element={<AddProductPage />} />
         <Route path="products/:id" element={<ProductDetailPage />} />

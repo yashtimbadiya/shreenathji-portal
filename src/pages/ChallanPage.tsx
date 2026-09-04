@@ -118,7 +118,7 @@ export function ChallanDetailPage() {
 
       {/* Screen-only action bar */}
       <div className="no-print mb-4 flex items-center gap-4">
-        <BackButton to="/challans" />
+        <BackButton />
         <div className="flex gap-2 ml-auto">
           <Button variant="outline" onClick={() => window.print()}><Printer size={16} /> Print</Button>
           <Button variant="outline"><Download size={16} /> Download PDF</Button>
