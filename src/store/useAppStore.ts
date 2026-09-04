@@ -114,6 +114,7 @@ interface AppState {
   deleteReference: (id: string) => void;
 
   addSharedVariant: (sv: Omit<SharedVariant, 'id' | 'createdDate'>) => void;
+  seedDefaultSharedVariants: () => void;
   updateSharedVariant: (id: string, data: Partial<SharedVariant>) => void;
   deleteSharedVariant: (id: string) => void;
 
@@ -137,6 +138,27 @@ interface AppState {
   /** Returns an array of human-readable reasons why a reference cannot be deleted */
   checkReferenceDeleteConstraints: (referenceId: string) => string[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Default shared variants seeded on first load
+// ─────────────────────────────────────────────────────────────────────────────
+const SIZE_NAMES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', '6XL', '7XL', '8XL', '9XL', '10XL'];
+const NUMBER_SIZES = Array.from({ length: 121 }, (_, i) => String(i)); // "0" … "120"
+
+export const DEFAULT_SHARED_VARIANTS: Omit<SharedVariant, 'id' | 'createdDate'>[] = [
+  ...SIZE_NAMES.map((name) => ({
+    name,
+    sku: name.toUpperCase(),
+    attributes: [{ key: 'Size', value: name }],
+    status: 'Active' as const,
+  })),
+  ...NUMBER_SIZES.map((n) => ({
+    name: n,
+    sku: n,
+    attributes: [{ key: 'Size', value: n }],
+    status: 'Active' as const,
+  })),
+];
 
 function generateId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -608,6 +630,18 @@ export const useAppStore = create<AppState>()(
             challanCounter: maxChallanCounter,
             connectionStatus: 'Local Server Connected',
           });
+
+          // ── Seed default shared variants if none exist yet (first-time setup)
+          if ((sharedVariants ?? []).length === 0) {
+            const today = new Date().toISOString().slice(0, 10);
+            const seeded: SharedVariant[] = DEFAULT_SHARED_VARIANTS.map((sv) => ({
+              ...sv,
+              id: generateId('sv'),
+              createdDate: today,
+            }));
+            set({ sharedVariants: seeded });
+            seeded.forEach((sv) => void saveSharedVariant(sv));
+          }
         } catch (error) {
           console.error('IndexedDB load failed', error);
           set({ connectionStatus: 'Offline' });
@@ -852,6 +886,22 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ sharedVariants: [record, ...s.sharedVariants] }));
         void saveSharedVariant(record);
         get().addToast(`Shared variant "${sv.name}" added`);
+        scheduleBackup();
+      },
+
+      seedDefaultSharedVariants: () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const existing = new Set(get().sharedVariants.map((sv) => sv.name.toUpperCase()));
+        const toAdd: SharedVariant[] = DEFAULT_SHARED_VARIANTS
+          .filter((sv) => !existing.has(sv.name.toUpperCase()))
+          .map((sv) => ({ ...sv, id: generateId('sv'), createdDate: today }));
+        if (toAdd.length === 0) {
+          get().addToast('All default variants already exist', 'info');
+          return;
+        }
+        set((s) => ({ sharedVariants: [...s.sharedVariants, ...toAdd] }));
+        toAdd.forEach((sv) => void saveSharedVariant(sv));
+        get().addToast(`${toAdd.length} default variant${toAdd.length !== 1 ? 's' : ''} added`);
         scheduleBackup();
       },
 

@@ -5,7 +5,7 @@
  * Color: Red, Width: 25mm). These can be applied to any product instead of
  * typing the same attributes every time.
  */
-import { Pencil, Plus, Save, Trash2, Tags } from 'lucide-react';
+import { Pencil, Plus, Save, Trash2, Tags, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
@@ -103,6 +103,7 @@ export function SharedVariantsPage() {
   const addSharedVariant  = useAppStore((s) => s.addSharedVariant);
   const updateSharedVariant = useAppStore((s) => s.updateSharedVariant);
   const deleteSharedVariant = useAppStore((s) => s.deleteSharedVariant);
+  const seedDefaultSharedVariants = useAppStore((s) => s.seedDefaultSharedVariants);
   const products          = useAppStore((s) => s.products);
   const checkConstraints  = useAppStore((s) => s.checkSharedVariantDeleteConstraints);
 
@@ -111,6 +112,7 @@ export function SharedVariantsPage() {
   const [search,      setSearch]      = useState('');
   const [deleteTarget,  setDeleteTarget]  = useState<SharedVariant | null>(null);
   const [blockedTarget, setBlockedTarget] = useState<{ name: string; reasons: string[] } | null>(null);
+  const [confirmSeed, setConfirmSeed] = useState(false);
 
   // N → open Add Variant form
   useNewItemShortcut(() => { setShowAddForm(true); setEditingId(null); });
@@ -171,11 +173,20 @@ export function SharedVariantsPage() {
         title="Shared Variants"
         subtitle={`${sharedVariants.length} variant${sharedVariants.length !== 1 ? 's' : ''} in library`}
         action={
-          !showAddForm ? (
-            <Button onClick={() => { setShowAddForm(true); setEditingId(null); }}>
-              <Plus size={16} className="mr-1" /> Add Variant
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmSeed(true)}
+              title="Add all default size variants (XXS–10XL, 0–120) that are not already present"
+            >
+              <RefreshCw size={15} className="mr-1" /> Seed Defaults
             </Button>
-          ) : undefined
+            {!showAddForm && (
+              <Button onClick={() => { setShowAddForm(true); setEditingId(null); }}>
+                <Plus size={16} className="mr-1" /> Add Variant
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -314,6 +325,14 @@ export function SharedVariantsPage() {
         title="Cannot Delete Shared Variant"
         entityName={blockedTarget?.name ?? ''}
         reasons={blockedTarget?.reasons ?? []}
+      />
+      <ConfirmDialog
+        open={confirmSeed}
+        onClose={() => setConfirmSeed(false)}
+        onConfirm={() => { seedDefaultSharedVariants(); setConfirmSeed(false); }}
+        title="Seed Default Variants"
+        message="This will add all missing default size variants (XXS → 10XL and numbers 0 → 120). Variants that already exist won't be duplicated."
+        confirmLabel="Add Defaults"
       />
     </div>
   );
