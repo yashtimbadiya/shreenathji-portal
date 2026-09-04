@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Pencil, Trash2 } from 'lucide-react';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
@@ -16,6 +16,7 @@ import {
   getJobSentTotal,
 } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
 
 const TIMELINE_STEPS = ['Job Created', 'Material Dispatched', 'Vendor Processing', 'Partial Receipt', 'QC', 'Completed'];
 
@@ -24,6 +25,8 @@ const TABS = ['Overview', 'Items', 'Lifecycle', 'Payments', 'Activity'];
 export function JobWorkDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const backTo = (location.state as { from?: string } | null)?.from ?? '/job-works';
   const jobWorks = useAppStore((s) => s.jobWorks);
   const dispatches = useAppStore((s) => s.dispatches);
   const receipts = useAppStore((s) => s.receipts);
@@ -105,7 +108,7 @@ export function JobWorkDetailPage() {
   return (
     <div>
       <div className="space-y-3 mb-6">
-        <BackButton to="/job-works" />
+        <BackButton to={backTo} />
         <Breadcrumb items={[{ label: 'Job Work', path: '/job-works' }, { label: job.jobNumber }]} />
       </div>
 
@@ -563,6 +566,9 @@ export function EditJobWorkPage() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [canSave]);
+
+  // ESC → back to job detail
+  useEscapeBack(() => navigate(job ? `/job-works/${job.id}` : '/job-works'));
 
   if (!job) {
     return (

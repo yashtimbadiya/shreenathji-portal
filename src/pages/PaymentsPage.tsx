@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Trash2, X } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
@@ -27,6 +27,7 @@ function badgeClass(status: string) {
 }
 
 export function PaymentsPage() {
+  const navigate   = useNavigate();
   const payments   = useAppStore((s) => s.payments);
   const vendors    = useAppStore((s) => s.vendors);
   const jobWorks   = useAppStore((s) => s.jobWorks);
@@ -206,9 +207,13 @@ export function PaymentsPage() {
                   return (
                     <tr key={job.id} className="border-b border-border hover:bg-surface/50">
                       <td className="px-4 py-3">
-                        <Link to={`/job-works/${job.id}`} className="font-semibold text-brand hover:underline">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/job-works/${job.id}`, { state: { from: '/payments' } })}
+                          className="font-semibold text-brand hover:underline"
+                        >
                           {job.jobNumber}
-                        </Link>
+                        </button>
                       </td>
                       <td className="px-4 py-3">{vendor?.name ?? '—'}</td>
                       <td className="px-4 py-3">{job.process}</td>
@@ -255,9 +260,13 @@ export function PaymentsPage() {
                 return (
                   <tr key={payment.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-4 py-3">
-                      <Link to={`/job-works/${payment.jobWorkId}`} className="font-semibold text-brand hover:underline">
-                        {job?.jobNumber ?? 'N/A'}
-                      </Link>
+                      <button
+                          type="button"
+                          onClick={() => navigate(`/job-works/${payment.jobWorkId}`, { state: { from: '/payments' } })}
+                          className="font-semibold text-brand hover:underline"
+                        >
+                          {job?.jobNumber ?? 'N/A'}
+                        </button>
                     </td>
                     <td className="px-4 py-3">{vendor?.name ?? '—'}</td>
                     <td className="px-4 py-3">{payment.process}</td>
