@@ -1,6 +1,6 @@
 import { Eye, Pencil, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -84,6 +84,22 @@ export function DashboardPage() {
   const [selectedMonth, setSelectedMonth] = useState(() => monthKey(new Date()));
   const currentMonthKey = monthKey(new Date());
   const isCurrentMonth  = selectedMonth === currentMonthKey;
+
+  // ── Shortcut: press N to open Create New Job Work ────────────────────────
+  const navigate = useNavigate();
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if ((e.target as HTMLElement).isContentEditable) return;
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        navigate('/job-works/create');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate]);
 
   // ── Lookup: variantId → { categoryId, unit } ─────────────────────────────
   const variantToCategory = useMemo(() => {
@@ -185,7 +201,7 @@ export function DashboardPage() {
         <h1 className="text-2xl font-bold text-charcoal">Dashboard</h1>
         <div className="flex items-center gap-3">
           <span className="hidden sm:inline-flex items-center gap-1.5 rounded-md bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs text-blue-700 font-medium">
-            <kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono text-[11px]">Shift+R</kbd>
+            <kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono text-[11px]">N</kbd>
             New Job Card
           </span>
           <Link

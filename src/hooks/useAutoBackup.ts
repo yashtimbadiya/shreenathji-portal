@@ -3,117 +3,143 @@
  *
  * Mount once at the app root (AppLayout).
  *
- * Backup layers handled here:
+ * Mirrors Miracle accounting-software backup behaviour:
  *
- *  Layer 1 – DAILY
- *    On first mount of the day, runs runAutoBackup() in the background.
+ *  ON EVERY LOAD  — runAutoBackup() writes a fresh dated file to the configured
+ *                   folder as soon as the app opens (no "already backed up today"
+ *                   gate — every session produces its own file).
  *
- *  Layer 2 – ON CLOSE / HIDE
- *    `pagehide`        – fires when the tab is closed, navigated away, or put in
- *                        bfcache. More reliable than `beforeunload` for async work.
- *    `visibilitychange`– fires when the user switches tabs or minimises the window.
- *                        We write on hide so a backup exists even if the process
- *                        is killed before the tab fully closes.
+ *  ON EVERY CLOSE — When the user closes the tab, navigates away, or switches
+ *                   tabs, a backup is written immediately.
+ *                   • Chrome / Edge (FSA supported + folder set)  → folder write
+ *                   • Firefox / Safari, OR no folder configured   → browser
+ *                     download (.xlsx lands in Downloads folder automatically)
  *
- *    We use a `keepAlive` approach: for browsers that support it we call
- *    `navigator.sendBeacon` as a hint that we need time (no actual payload needed
- *    for FSAA writes), and we use `event.waitUntil` in a service-worker context
- *    when available. In practice, Chrome/Edge grant ~500 ms for FSAA writes on
- *    pagehide, which is enough for the workbook build + write.
+ *  AFTER MUTATIONS — scheduleBackup() is debounced 10 s after every
+ *                    create/update/delete in the Zustand store.
  *
- *  Layer 3 – MUTATIONS (scheduleBackup)
- *    Called from the Zustand store after every create/update/delete.
- *    Debounced 10 s — so a backup runs within 10 s of any data change.
- *    Wired up in useAppStore, not here.
+ *  MANUAL          — "Backup Now" in Settings always calls writeBackupToFolder()
+ *                    or triggerDownloadBackup() directly.
  *
- *  Layer 4 – MANUAL
- *    "Backup Now" button in Settings always calls writeBackupToFolder() directly.
+ * Nothing is ever deleted from the backup folder.
  */
 
 import { useEffect, useRef } from 'react';
 import {
-  hasBackedUpToday,
+  supportsFileSystemAccess,
   runAutoBackup,
   writeBackupToFolder,
+  triggerDownloadBackup,
   loadDirectoryHandle,
   cancelScheduledBackup,
 } from '../api/autoBackup';
 
 export function useAutoBackup() {
-  // Track whether a close-backup is already in flight so we don't double-write
+  /** Prevents double-firing if both pagehide and visibilitychange fire together */
   const closingRef = useRef(false);
 
-  // ── Layer 1: daily backup on first load ─────────────────────────────────────
+  // ── ON LOAD: write a backup immediately ─────────────────────────────────────
   useEffect(() => {
-    if (hasBackedUpToday()) return;
     runAutoBackup().then((result) => {
       if (result === 'folder') {
-        console.info('[autoBackup] Daily backup written to folder.');
+        console.info('[autoBackup] ✓ On-load backup written to folder.');
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Layer 2: backup on tab close / hide ─────────────────────────────────────
+  // ── ON CLOSE / HIDE: always write a backup ──────────────────────────────────
   useEffect(() => {
-    /** Attempt to write a backup. Fire-and-forget — browsers may not await it,
-     *  but Chrome/Edge give enough time for File System Access API writes. */
+    /**
+     * Attempt to write a backup when the app is about to close or be hidden.
+     *
+     * Strategy:
+     *  1. If FSA is supported AND a folder is already configured with active
+     *     permission → write to folder (silent, no user interaction needed).
+     *  2. Otherwise → trigger a browser download so the user still gets a
+     *     local .xlsx in their Downloads folder automatically.
+     *
+     * We use fire-and-forget Promises because close/hide event handlers cannot
+     * be made async. Chrome/Edge keep the page alive ~500 ms for FSA writes,
+     * which is enough. The download fallback uses a Blob URL + <a>.click()
+     * which completes synchronously enough to survive the page unload budget.
+     */
     const attemptBackupOnClose = () => {
-      if (closingRef.current) return;   // already triggered
+      if (closingRef.current) return;
       closingRef.current = true;
 
-      // Cancel any pending debounced backup — we're writing right now
+      // Cancel any pending debounced backup — we are writing right now
       cancelScheduledBackup();
 
-      // Fire the write. We deliberately don't await because these event
-      // handlers cannot be async; the Promise runs in the micro-task queue
-      // and Chrome/Edge keep the page alive long enough to finish it.
-      loadDirectoryHandle().then((handle) => {
-        if (handle) {
-          writeBackupToFolder().then((ok) => {
-            if (!ok) {
-              console.warn('[autoBackup] Close-backup write failed or had no permission.');
-            }
-          });
-        }
-      });
-    };
-
-    // `pagehide` is the most reliable "tab is closing" event.
-    // It also fires for back/forward cache freeze, which is fine — we always
-    // want a fresh backup before the page state is frozen.
-    const onPageHide = (e: PageTransitionEvent) => {
-      // e.persisted = true means it's going into bfcache (not really closing),
-      // but we write anyway since the state is being "frozen".
-      void e;
-      attemptBackupOnClose();
-      closingRef.current = false; // reset so the next pagehide also fires
-    };
-
-    // `visibilitychange` catches tab switches and window minimise.
-    // Write when the page becomes hidden.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        attemptBackupOnClose();
-        // Reset so the next hide also triggers
-        closingRef.current = false;
+      if (supportsFileSystemAccess) {
+        // Try folder write first
+        loadDirectoryHandle().then((handle) => {
+          if (!handle) {
+            // No folder configured — fall back to download
+            triggerDownloadBackup().catch(() => { /* ignore on unload */ });
+            return;
+          }
+          // Only proceed if permission is already granted (can't prompt on close)
+          const h = handle as unknown as {
+            queryPermission(opts: { mode: string }): Promise<PermissionState>;
+          };
+          h.queryPermission({ mode: 'readwrite' })
+            .then((status) => {
+              if (status === 'granted') {
+                writeBackupToFolder().then((ok) => {
+                  if (!ok) {
+                    // Permission lapsed — fall back to download
+                    triggerDownloadBackup().catch(() => { /* ignore */ });
+                  }
+                });
+              } else {
+                // Permission not active — fall back to download
+                triggerDownloadBackup().catch(() => { /* ignore */ });
+              }
+            })
+            .catch(() => {
+              triggerDownloadBackup().catch(() => { /* ignore */ });
+            });
+        });
+      } else {
+        // FSA not available (Firefox, Safari) — always download
+        triggerDownloadBackup().catch(() => { /* ignore on unload */ });
       }
     };
 
-    // `beforeunload` as a final safety net (synchronous budget only, but worth
-    // registering for non-FSA fallback environments).
+    const resetClosing = () => { closingRef.current = false; };
+
+    // pagehide — most reliable "tab closing / navigating away" event.
+    // Fires even when the browser puts the page into bfcache (back/forward).
+    const onPageHide = () => {
+      attemptBackupOnClose();
+      resetClosing(); // reset so the next pagehide also fires
+    };
+
+    // visibilitychange — catches tab switches and window minimise.
+    // We write on hide so data is safe even if the OS kills the process
+    // before the tab fully closes.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        attemptBackupOnClose();
+        resetClosing();
+      }
+    };
+
+    // beforeunload — final safety net (synchronous budget, ~50 ms).
+    // Mainly useful as a nudge for the browser to keep the page alive longer.
     const onBeforeUnload = () => {
       attemptBackupOnClose();
     };
 
-    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pagehide',           onPageHide);
     document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('beforeunload',       onBeforeUnload);
 
     return () => {
-      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pagehide',           onPageHide);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('beforeunload',       onBeforeUnload);
     };
   }, []);
 }

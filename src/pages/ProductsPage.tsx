@@ -188,7 +188,7 @@ export function AddProductPage() {
   const selectedCategory  = categories.find((c) => c.id === categoryId);
   const inheritedSvCount  = selectedCategory?.sharedVariantIds?.length ?? 0;
   const categoryHasSvs    = inheritedSvCount > 0;
-  const canSave           = !!name && !!categoryId && categoryHasSvs;
+  const canSave           = !!name && !!categoryId && !!rate && categoryHasSvs;
 
   // ESC → cancel / go back
   useEscapeBack(() => navigate(returnTo));
@@ -314,13 +314,14 @@ export function AddProductPage() {
               ]}
             />
             <Input
-              label="Rate (₹) — optional"
+              label="Rate (₹) *"
               type="number"
               min="0"
               step="0.01"
               value={rate}
               onChange={(e) => setRate(e.target.value)}
               placeholder="0.00"
+              required
             />
           </div>
         </Card>
@@ -611,7 +612,7 @@ export function EditProductPage() {
   const canAddVariant = addMode === 'shared' ? !!selectedSvId : newVName.trim() !== '' && newVSku.trim() !== '';
 
   const submitRef = useRef<HTMLButtonElement>(null);
-  const canSave   = !!name && !!categoryId && !!code;
+  const canSave   = !!name && !!categoryId && !!rate;
 
   // ESC → back
   useEscapeBack(() => navigate(product ? `/products/${product.id}` : '/products'));
@@ -726,11 +727,10 @@ export function EditProductPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Input
-                label="Subproduct Code *"
+                label="Subproduct Code — optional"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="MAR-ELA"
-                required
               />
 
               <Select
@@ -745,13 +745,14 @@ export function EditProductPage() {
               />
 
               <Input
-                label="Rate (₹) — optional"
+                label="Rate (₹) *"
                 type="number"
                 min="0"
                 step="0.01"
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
                 placeholder="0.00"
+                required
               />
             </div>
 

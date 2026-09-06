@@ -1,8 +1,9 @@
-import { ChevronRight, Printer, Plus, Tag, Trash2 } from 'lucide-react';
+import { ChevronRight, ExternalLink, Printer, Plus, Tag, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, PageHeader } from '../components/ui/Card';
+import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan } from '../components/ui/ChallanPrint';
 import { focusNextInForm, Input, SearchableSelect, Select } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
@@ -35,6 +36,16 @@ interface DraftState {
   lineItems: LineItem[];
 }
 
+/**
+ * Stable per-item key that prevents collision when two items in the same
+ * reference share the same productId but differ by variantId or position.
+ *
+ * Format: "<productId>::<variantId|idx>"
+ */
+function makeItemKey(productId: string, variantId: string | undefined, idx: number): string {
+  return `${productId}::${variantId ?? idx}`;
+}
+
 function loadDraft(): DraftState | null {
   try {
     const raw = sessionStorage.getItem(DRAFT_KEY);
@@ -51,9 +62,9 @@ function formatCurrency(n: number) {
 }
 
 // ─── Inline challan print dialog ─────────────────────────────────────────────
-// Renders a confirmation popup with the full challan content embedded.
-// Clicking "Print" calls window.print() — the challan is shown via @media print
-// while the dialog chrome is hidden, giving a clean A5 printout.
+// Shows a full A5-landscape preview of the challan inside a scrollable modal.
+// Clicking "Print" calls window.print() which hides everything except the
+// #challan-print-area div (via CHALLAN_PRINT_CSS).
 
 function PrintChallanDialog({
   challanId,
@@ -64,34 +75,19 @@ function PrintChallanDialog({
   jobId: string;
   onClose: () => void;
 }) {
-  const navigate    = useNavigate();
-  const dispatches  = useAppStore((s) => s.dispatches);
-  const jobWorks    = useAppStore((s) => s.jobWorks);
-  const vendors     = useAppStore((s) => s.vendors);
-  const products    = useAppStore((s) => s.products);
-  const categories  = useAppStore((s) => s.categories);
-  const settings    = useAppStore((s) => s.settings);
+  const navigate   = useNavigate();
+  const dispatches = useAppStore((s) => s.dispatches);
+  const jobWorks   = useAppStore((s) => s.jobWorks);
+  const vendors    = useAppStore((s) => s.vendors);
+  const products   = useAppStore((s) => s.products);
+  const categories = useAppStore((s) => s.categories);
+  const settings   = useAppStore((s) => s.settings);
 
   const printBtnRef = useRef<HTMLButtonElement>(null);
 
   const dispatch = dispatches.find((d) => d.id === challanId);
   const job      = jobWorks.find((j) => j.id === jobId);
   const vendor   = vendors.find((v) => v.id === job?.vendorId) ?? null;
-
-  const items = (dispatch?.items ?? []).map((di) => {
-    let jobItem = job?.items.find((ji) => di.jobWorkItemId && di.jobWorkItemId === ji.id);
-    if (!jobItem) jobItem = job?.items.find((ji) => ji.variantId === di.variantId);
-    const product = products.find((p) => p.id === jobItem?.productId)
-      ?? products.find((p) => p.variants.some((v) => v.id === di.variantId));
-    const rate = jobItem?.rate ?? 0;
-    return { product, quantity: di.quantity, weight: di.weight, rate, amount: di.quantity * rate };
-  });
-
-  const totalAmount = items.reduce((s, i) => s + i.amount, 0);
-  const totalPieces = items.reduce((s, i) => s + i.quantity, 0);
-  const totalWeight = items.some((i) => i.weight != null)
-    ? items.reduce((s, i) => s + (i.weight ?? 0), 0)
-    : null;
 
   // ── ESC closes the dialog ────────────────────────────────────────────────
   useEffect(() => {
@@ -102,284 +98,96 @@ function PrintChallanDialog({
         onClose();
       }
     };
-    window.addEventListener('keydown', handler, true); // capture phase — runs before page-level handlers
+    window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
   }, [onClose]);
 
-  // ── Auto-focus the Print button when dialog mounts ───────────────────────
+  // ── Auto-focus Print button ──────────────────────────────────────────────
   useEffect(() => {
     const t = setTimeout(() => printBtnRef.current?.focus(), 60);
     return () => clearTimeout(t);
   }, []);
 
-  const handlePrint = () => {
-    window.print();
-  };
+  if (!dispatch || !job) return null;
 
-  const handleViewJob = () => {
-    onClose();
-  };
+  const printData = buildChallanPrintData(dispatch, job, vendor, products, categories, settings);
 
-  const handleViewChallan = () => {
-    navigate(`/challans/${challanId}`);
-  };
-
-  if (!dispatch) return null;
+  const handlePrint  = () => printChallan(printData);
+  const handleViewChallan = () => navigate(`/challans/${challanId}`);
 
   return (
     <>
-      {/* ── Print CSS: hide everything except challan, size A5 landscape ── */}
-      <style>{`
-        @media screen {
-          #challan-print-root {
-            display: none;
-          }
-        }
-        @media print {
-          @page {
-            size: A5 landscape;
-            margin: 8mm;
-          }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-          }
-          body * { visibility: hidden !important; }
-          #challan-print-root,
-          #challan-print-root * { visibility: visible !important; }
-          #challan-print-root {
-            display: block !important;
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #fff !important;
-          }
-        }
-      `}</style>
+      {/* ── Print CSS injected globally: hides everything except the preview ── */}
+      <style>{CHALLAN_PRINT_CSS}</style>
 
-      {/* ── Challan content — hidden on screen via CSS, shown on print ── */}
+      {/* ── Modal overlay (hidden on print via .no-print) ── */}
       <div
-        id="challan-print-root"
-        style={{ fontFamily: 'sans-serif', fontSize: '11px' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Challan preview"
+        className="no-print fixed inset-0 z-50 flex flex-col items-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8"
       >
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #c41e3a', paddingBottom: '8px', marginBottom: '12px' }}>
-          <div>
-            <div style={{ fontSize: '14px', fontWeight: 700, color: '#c41e3a' }}>{settings.companyName}</div>
-            <div style={{ color: '#6b7280', lineHeight: 1.4, marginTop: '2px' }}>{settings.address}</div>
-            <div style={{ color: '#6b7280' }}>Ph: {settings.phone} | GST: {settings.gstin}</div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Delivery Challan</div>
-            <div style={{ color: '#6b7280', marginTop: '2px' }}>No: <strong style={{ color: '#111' }}>{dispatch.challanNumber}</strong></div>
-            <div style={{ color: '#6b7280' }}>Date: <strong style={{ color: '#111' }}>{dispatch.date}</strong></div>
-            <div style={{ color: '#6b7280' }}>Job: <strong style={{ color: '#111' }}>{job?.jobNumber ?? '—'}</strong></div>
-            {job?.reference && <div style={{ color: '#c41e3a', fontWeight: 600, marginTop: '2px' }}>Ref: {job.reference}</div>}
-            {totalWeight != null && (
-              <div style={{ color: '#374151', fontWeight: 600, marginTop: '2px' }}>
-                Total Weight: <strong style={{ color: '#111' }}>{totalWeight.toFixed(3)} kg</strong>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Vendor + Transport */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-          <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px' }}>
-            <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '4px' }}>To (Vendor)</div>
-            <div style={{ fontWeight: 600 }}>{vendor?.name ?? '—'}</div>
-            <div style={{ color: '#6b7280' }}>{vendor?.contactPerson} · {vendor?.mobile}</div>
-            {vendor?.gstNumber && <div style={{ color: '#6b7280' }}>GST: {vendor.gstNumber}</div>}
-          </div>
-          <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '8px 10px' }}>
-            <div style={{ fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '4px' }}>Transport</div>
-            <div style={{ fontWeight: 600 }}>{dispatch.transport}</div>
-            {dispatch.vehicleNumber && <div style={{ color: '#6b7280' }}>Vehicle: {dispatch.vehicleNumber}</div>}
-            {dispatch.driver && <div style={{ color: '#6b7280' }}>Driver: {dispatch.driver}</div>}
-            <div style={{ color: '#6b7280' }}>Process: <strong style={{ color: '#111' }}>{job?.process ?? '—'}</strong></div>
-          </div>
-        </div>
-
-        {/* Per-reference weight summary — shown after Ref line in header */}
-        {(() => {
-          // Group items by reference number
-          const refGroups = new Map<string, typeof items>();
-          items.forEach((item, idx) => {
-            const dispatchItem = dispatch!.items[idx];
-            let jobItem = job?.items.find((ji) => dispatchItem.jobWorkItemId && dispatchItem.jobWorkItemId === ji.id);
-            if (!jobItem) jobItem = job?.items.find((ji) => ji.variantId === dispatchItem.variantId);
-            // Try to get refNumber from job reference field; fall back to single ref
-            const refLabel = job?.reference ?? '—';
-            const key = refLabel;
-            if (!refGroups.has(key)) refGroups.set(key, []);
-            refGroups.get(key)!.push(item);
-          });
-          // Weight per reference
-          const refWeights: { ref: string; pieces: number; weight: number | null }[] = [];
-          refGroups.forEach((grpItems, ref) => {
-            const hasWeight = grpItems.some((i) => i.weight != null);
-            refWeights.push({
-              ref,
-              pieces: grpItems.reduce((s, i) => s + i.quantity, 0),
-              weight: hasWeight ? grpItems.reduce((s, i) => s + (i.weight ?? 0), 0) : null,
-            });
-          });
-          if (!refWeights.some((r) => r.weight != null)) return null;
-          return (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
-              {refWeights.map((r) => r.weight != null && (
-                <div key={r.ref} style={{ border: '1px solid #e5e7eb', borderRadius: '6px', padding: '5px 10px', fontSize: '10px' }}>
-                  <span style={{ fontWeight: 700, color: '#c41e3a' }}>Ref: {r.ref}</span>
-                  <span style={{ color: '#6b7280', marginLeft: '8px' }}>{r.pieces.toLocaleString('en-IN')} Pic</span>
-                  <span style={{ color: '#374151', fontWeight: 600, marginLeft: '8px' }}>{r.weight!.toFixed(3)} kg</span>
-                </div>
-              ))}
-              {totalWeight != null && refWeights.length > 1 && (
-                <div style={{ border: '1px solid #c41e3a', borderRadius: '6px', padding: '5px 10px', fontSize: '10px', background: '#fff5f5' }}>
-                  <span style={{ fontWeight: 700, color: '#c41e3a' }}>Total Weight:</span>
-                  <span style={{ color: '#374151', fontWeight: 600, marginLeft: '8px' }}>{totalWeight.toFixed(3)} kg</span>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* Items table — no weight column */}
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px', fontSize: '10px' }}>
-          <thead>
-            <tr style={{ background: '#f9fafb' }}>
-              {['#', 'Product', 'Category', 'Pieces', 'Rate (₹)', 'Amount (₹)'].map((h) => (
-                <th key={h} style={{ border: '1px solid #d1d5db', padding: '5px 7px', textAlign: h === '#' ? 'left' : 'right', fontWeight: 600 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, i) => {
-              const catName = item.product
-                ? (categories.find((c) => c.id === item.product!.categoryId)?.name ?? '—')
-                : '—';
-              return (
-                <tr key={i}>
-                  <td style={{ border: '1px solid #d1d5db', padding: '4px 7px', color: '#6b7280' }}>{i + 1}</td>
-                  <td style={{ border: '1px solid #d1d5db', padding: '4px 7px', fontWeight: 500 }}>{item.product?.name ?? '—'}</td>
-                  <td style={{ border: '1px solid #d1d5db', padding: '4px 7px', color: '#6b7280' }}>{catName}</td>
-                  <td style={{ border: '1px solid #d1d5db', padding: '4px 7px', textAlign: 'right' }}>{item.quantity.toLocaleString('en-IN')}</td>
-                  <td style={{ border: '1px solid #d1d5db', padding: '4px 7px', textAlign: 'right' }}>₹{item.rate.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                  <td style={{ border: '1px solid #d1d5db', padding: '4px 7px', textAlign: 'right', fontWeight: 600 }}>₹{item.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr style={{ background: '#f9fafb' }}>
-              <td colSpan={3} style={{ border: '1px solid #d1d5db', padding: '5px 7px', fontWeight: 700, fontSize: '9px', textTransform: 'uppercase' }}>Total</td>
-              <td style={{ border: '1px solid #d1d5db', padding: '5px 7px', textAlign: 'right', fontWeight: 700 }}>{totalPieces.toLocaleString('en-IN')} Pic</td>
-              <td style={{ border: '1px solid #d1d5db', padding: '5px 7px' }} />
-              <td style={{ border: '1px solid #d1d5db', padding: '5px 7px', textAlign: 'right', fontWeight: 700, color: '#c41e3a' }}>₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-            </tr>
-          </tfoot>
-        </table>
-
-        {/* Signatures */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '40px' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ width: '160px', borderTop: '1px solid #111', paddingTop: '6px' }}>
-              <div style={{ fontWeight: 600 }}>Authorized Signature</div>
-              <div style={{ color: '#6b7280' }}>{settings.companyName}</div>
-            </div>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ width: '160px', borderTop: '1px solid #111', paddingTop: '6px' }}>
-              <div style={{ fontWeight: 600 }}>Vendor Signature</div>
-              <div style={{ color: '#6b7280' }}>{vendor?.name ?? '—'}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Screen dialog overlay ── */}
-      <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm print:hidden">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center gap-3 px-6 py-5 border-b border-border">
-            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-              <span className="text-green-700 text-xl">✓</span>
-            </div>
+        {/* ── Top bar: title + action buttons ── */}
+        <div className="no-print w-full max-w-[860px] px-4 mb-4 flex items-center gap-3 flex-shrink-0">
+          {/* Left: success badge */}
+          <div className="flex items-center gap-2.5 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5">
+            <span className="text-green-600 text-lg leading-none">✓</span>
             <div>
-              <h2 className="text-base font-bold text-charcoal">Dispatched Successfully</h2>
-              <p className="text-xs text-muted mt-0.5">
-                {job?.jobNumber} · Challan {dispatch.challanNumber}
-              </p>
+              <p className="text-sm font-bold text-green-800">Dispatched Successfully</p>
+              <p className="text-xs text-green-600">{job.jobNumber} · {dispatch.challanNumber}</p>
             </div>
           </div>
 
-          {/* Body */}
-          <div className="px-6 py-5 space-y-4">
-            {/* Challan summary card */}
-            <div className="rounded-xl border border-border bg-surface p-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted">Vendor</span>
-                <span className="font-semibold text-charcoal">{vendor?.name ?? '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted">Challan No.</span>
-                <span className="font-semibold text-brand">{dispatch.challanNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted">Total Pieces</span>
-                <span className="font-semibold text-charcoal">{totalPieces.toLocaleString('en-IN')} Pic</span>
-              </div>
-              <div className="flex justify-between border-t border-border pt-2">
-                <span className="text-muted">Total Amount</span>
-                <span className="font-bold text-brand">₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-              </div>
-            </div>
-
-            {/* Print prompt */}
-            <div className="flex items-start gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3">
-              <Printer size={16} className="text-blue-600 shrink-0 mt-0.5" />
-              <p className="text-sm text-blue-800">
-                Do you want to print the delivery challan for this dispatch?
-              </p>
-            </div>
-
-            {/* ESC hint */}
-            <p className="text-xs text-center text-muted">
-              Press <kbd className="bg-surface border border-border px-1.5 py-0.5 rounded font-mono">Esc</kbd> to go back to the job
-            </p>
-          </div>
-
-          {/* Footer */}
-          <div className="px-6 py-4 border-t border-border flex items-center gap-3 justify-end">
-            <button
-              type="button"
-              onClick={handleViewJob}
-              className="cursor-pointer px-4 py-2 rounded-lg border border-border text-sm font-medium text-charcoal hover:bg-surface transition-colors"
-            >
-              Skip, View Job
-            </button>
+          {/* Right: actions */}
+          <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
               onClick={handleViewChallan}
-              className="cursor-pointer px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted hover:bg-surface transition-colors"
+              className="no-print inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border bg-white text-sm font-medium text-charcoal hover:bg-surface transition-colors"
             >
+              <ExternalLink size={14} />
               View Challan
             </button>
             <button
               ref={printBtnRef}
               type="button"
               onClick={handlePrint}
-              className="cursor-pointer inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:bg-brand/90 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40"
+              className="no-print inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-brand text-white text-sm font-semibold hover:bg-brand/90 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 shadow-sm"
             >
               <Printer size={15} />
-              Yes, Print
+              Print A5
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title="Close (Esc)"
+              className="no-print ml-1 p-2 rounded-lg border border-border bg-white text-muted hover:text-charcoal hover:bg-surface transition-colors"
+            >
+              <X size={16} />
             </button>
           </div>
         </div>
+
+        {/* ── A5 preview card — this IS the print target ── */}
+        <div className="w-full max-w-[860px] px-4 flex-shrink-0">
+          {/* Paper shadow / frame */}
+          <div className="rounded-xl shadow-2xl ring-1 ring-black/10 bg-white">
+            {/* Page label */}
+            <div className="no-print flex items-center justify-between bg-gray-700 rounded-t-xl px-4 py-1.5 text-xs text-gray-300">
+              <span className="font-medium">A5 Landscape — Print Preview</span>
+              <span className="font-mono text-gray-400">{dispatch.challanNumber}</span>
+            </div>
+
+            {/* The actual A5 content — also the print target */}
+            <ChallanPrintPreview data={printData} />
+          </div>
+        </div>
+
+        {/* ── Keyboard hint ── */}
+        <p className="no-print mt-4 text-xs text-white/60">
+          <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Esc</kbd> — close &nbsp;·&nbsp;
+          <kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">Ctrl+P</kbd> — print
+        </p>
       </div>
     </>
   );
@@ -426,8 +234,16 @@ export function CreateJobWorkPage() {
   const confirmBtnRef       = useRef<HTMLButtonElement>(null);
   const formRef             = useRef<HTMLDivElement>(null);
   const refSelectTriggerRef = useRef<HTMLButtonElement>(null);
+  const vendorTriggerRef    = useRef<HTMLButtonElement>(null);
   const productCardRef      = useRef<HTMLDivElement>(null);
   const addAllBtnRef        = useRef<HTMLButtonElement>(null);
+  /** Ref for the Add button on single-item references — auto-focused on ref select */
+  const addSingleBtnRef     = useRef<HTMLButtonElement>(null);
+
+  // Auto-focus vendor field on mount
+  useEffect(() => {
+    setTimeout(() => vendorTriggerRef.current?.focus(), 0);
+  }, []);
 
   // ── Persist draft to sessionStorage on every change ──────────────────────
   useEffect(() => {
@@ -556,22 +372,31 @@ export function CreateJobWorkPage() {
     }];
   }, [selectedRefData]);
 
-  // Pre-fill drafts when reference changes
+  // Pre-fill drafts when reference changes.
+  // Keys are itemKey = "<productId>::<variantId|idx>" so that two items in the
+  // same reference that share the same productId (but differ by variantId) never
+  // stomp each other's qty/rate/variant values.
   useEffect(() => {
     if (!selectedRefData) { setDraftRates({}); setDraftQtys({}); setDraftWeights({}); setDraftVariants({}); return; }
-    const rates: Record<string, string> = {};
-    const qtys:  Record<string, string> = {};
-    const weights: Record<string, string> = {};
+    const rates:    Record<string, string> = {};
+    const qtys:     Record<string, string> = {};
+    const weights:  Record<string, string> = {};
     const variants: Record<string, string> = {};
-    refItems.forEach((item) => {
-      const prod = products.find((p) => p.id === item.productId);
-      qtys[item.productId]     = String(item.pieces);
-      rates[item.productId]    = prod?.rate ? String(prod.rate) : '';
-      weights[item.productId]  = '';
-      // Pre-select the variant from the reference, or fall back to first active variant
-      const activeVariants     = prod?.variants.filter((v) => v.status === 'Active') ?? [];
-      const defaultVariant     = item.variantId ?? activeVariants[0]?.id ?? prod?.variants[0]?.id ?? '';
-      variants[item.productId] = defaultVariant;
+    refItems.forEach((item, idx) => {
+      const prod          = products.find((p) => p.id === item.productId);
+      const activeVars    = prod?.variants.filter((v) => v.status === 'Active') ?? [];
+      // Resolve the correct variant: prefer the one stored on the reference item,
+      // then first active variant, then first variant of any status.
+      const resolvedVar   =
+        item.variantId ??
+        activeVars[0]?.id ??
+        prod?.variants[0]?.id ??
+        '';
+      const key           = makeItemKey(item.productId, resolvedVar, idx);
+      qtys[key]           = String(item.pieces);
+      rates[key]          = prod?.rate ? String(prod.rate) : '';
+      weights[key]        = '';
+      variants[key]       = resolvedVar;
     });
     setDraftRates(rates);
     setDraftQtys(qtys);
@@ -587,15 +412,35 @@ export function CreateJobWorkPage() {
     }
   }, [selectedRefId]);
 
-  // When a multi-item reference is selected, auto-focus the "Add All" button
+  // Auto-focus behavior when a reference is selected:
+  //   • multi-item  → focus "Add All" button
+  //   • single-item → focus the Add button directly (user can hit Enter immediately)
   useEffect(() => {
-    if (selectedRefId && refItems.length > 1) {
+    if (!selectedRefId) return;
+    if (refItems.length > 1) {
       setTimeout(() => addAllBtnRef.current?.focus(), 80);
+    } else if (refItems.length === 1) {
+      setTimeout(() => addSingleBtnRef.current?.focus(), 80);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRefId]);
 
-  const pendingRefItems = refItems.filter((item) => item.productId in draftQtys);
+  // An item is "pending" when its itemKey is still present in draftQtys.
+  // We annotate each refItem with its key so all downstream handlers stay in sync.
+  const pendingRefItems = useMemo(
+    () =>
+      refItems
+        .map((item, idx) => {
+          const resolvedVariant = draftVariants[makeItemKey(item.productId, item.variantId, idx)]
+            ?? item.variantId
+            ?? '';
+          const key = makeItemKey(item.productId, resolvedVariant || item.variantId, idx);
+          return { ...item, _key: key, _idx: idx, _resolvedVariant: resolvedVariant };
+        })
+        .filter((item) => item._key in draftQtys),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refItems, draftQtys, draftVariants],
+  );
 
   const grandTotals = useMemo(
     () => lineItems.reduce(
@@ -619,6 +464,10 @@ export function CreateJobWorkPage() {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   const removeLineItem = (idx: number) => setLineItems((prev) => prev.filter((_, i) => i !== idx));
+
+  /** Remove every line item that belongs to a reference group, freeing the reference for reuse */
+  const removeRefGroup = (refNum: string) =>
+    setLineItems((prev) => prev.filter((li) => (li.refNumber ?? '(no reference)') !== refNum));
   const updateLineItem = (idx: number, field: 'quantity' | 'rate' | 'weight', value: number) =>
     setLineItems((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: value } : item)));
 
@@ -642,46 +491,47 @@ export function CreateJobWorkPage() {
     }
   };
 
-  const addRefItemToJob = (productId: string, variantId: string) => {
-    const qty    = Number(draftQtys[productId])    || 0;
-    const rate   = Number(draftRates[productId])   || 0;
-    const weight = Number(draftWeights[productId]) || undefined;
+  /**
+   * Add a single pending item to the job by its itemKey.
+   * itemKey format: "<productId>::<resolvedVariantId|idx>"
+   */
+  const addRefItemToJob = (itemKey: string, productId: string, resolvedVariantId: string) => {
+    const qty    = Number(draftQtys[itemKey])    || 0;
+    const rate   = Number(draftRates[itemKey])   || 0;
+    const weight = Number(draftWeights[itemKey]) || undefined;
     if (!qty) return;
-    // Use the user-selected variant from draftVariants (falls back to passed variantId)
-    const resolvedVariantId = draftVariants[productId] || variantId;
     const refNumber = selectedRefData?.referenceNumber;
     setLineItems((prev) => [...prev, { productId, variantId: resolvedVariantId, quantity: qty, rate, weight, refNumber }]);
-    const newDraftQtys     = { ...draftQtys };     delete newDraftQtys[productId];
-    const newDraftRates    = { ...draftRates };    delete newDraftRates[productId];
-    const newDraftWeights  = { ...draftWeights };  delete newDraftWeights[productId];
-    const newDraftVariants = { ...draftVariants }; delete newDraftVariants[productId];
+    // Remove just this key from all four draft maps
+    const newDraftQtys     = { ...draftQtys };     delete newDraftQtys[itemKey];
+    const newDraftRates    = { ...draftRates };    delete newDraftRates[itemKey];
+    const newDraftWeights  = { ...draftWeights };  delete newDraftWeights[itemKey];
+    const newDraftVariants = { ...draftVariants }; delete newDraftVariants[itemKey];
     setDraftQtys(newDraftQtys);
     setDraftRates(newDraftRates);
     setDraftWeights(newDraftWeights);
     setDraftVariants(newDraftVariants);
     // How many items will remain pending after this removal?
-    const remaining = pendingRefItems.filter((i) => i.productId !== productId).length;
+    const remaining = pendingRefItems.filter((i) => i._key !== itemKey).length;
     resetRefAfterAdd(remaining);
   };
 
   const addAllRefItems = () => {
     const refNumber = selectedRefData?.referenceNumber;
     const newItems: LineItem[] = [];
-    refItems.forEach((item) => {
-      const qty    = Number(draftQtys[item.productId])    || 0;
-      const rate   = Number(draftRates[item.productId])   || 0;
-      const weight = Number(draftWeights[item.productId]) || undefined;
+    pendingRefItems.forEach((item) => {
+      const qty    = Number(draftQtys[item._key])    || 0;
+      const rate   = Number(draftRates[item._key])   || 0;
+      const weight = Number(draftWeights[item._key]) || undefined;
       if (!qty) return;
-      const prod = products.find((p) => p.id === item.productId);
-      // Use the user-selected variant; fall back to reference variantId or first active variant
-      const activeVariants = prod?.variants.filter((v) => v.status === 'Active') ?? [];
-      const variantId =
-        draftVariants[item.productId] ||
-        item.variantId ||
-        activeVariants[0]?.id ||
-        prod?.variants[0]?.id ||
-        '';
-      newItems.push({ productId: item.productId, variantId, quantity: qty, rate, weight, refNumber });
+      newItems.push({
+        productId:  item.productId,
+        variantId:  item._resolvedVariant || item.variantId || '',
+        quantity:   qty,
+        rate,
+        weight,
+        refNumber,
+      });
     });
     if (newItems.length === 0) return;
     setLineItems((prev) => [...prev, ...newItems]);
@@ -729,7 +579,9 @@ export function CreateJobWorkPage() {
       createdBy: currentUser?.name ?? 'User',
       items: rawItems.map(({ _dispatchQty, ...rest }) => ({
         ...rest,
-        sentQuantity: mode === 'confirm' ? (_dispatchQty ?? 0) : 0,
+        // Always start at 0 — createDispatch will increment sentQuantity
+        // on the 'confirm' path, so pre-setting it here would double-count.
+        sentQuantity: 0,
       })),
     });
 
@@ -791,6 +643,7 @@ export function CreateJobWorkPage() {
                   placeholder="Search vendor…"
                   options={vendors.map((v) => ({ value: v.id, label: v.name }))}
                   tabIndex={1}
+                  triggerRef={vendorTriggerRef}
                 />
                 <Select
                   label="Process"
@@ -871,18 +724,15 @@ export function CreateJobWorkPage() {
                           const prod           = products.find((p) => p.id === item.productId);
                           const activeVariants = prod?.variants.filter((v) => v.status === 'Active') ?? [];
                           const variantOptions = activeVariants.length > 0 ? activeVariants : (prod?.variants ?? []);
-                          const selectedVariantId =
-                            draftVariants[item.productId] ||
-                            item.variantId ||
-                            variantOptions[0]?.id ||
-                            '';
+                          // Use the already-resolved variant from the item key
+                          const selectedVariantId = item._resolvedVariant || variantOptions[0]?.id || '';
                           const variant = variantOptions.find((v) => v.id === selectedVariantId) ?? variantOptions[0];
-                          const qty    = Number(draftQtys[item.productId])  || 0;
-                          const rate   = Number(draftRates[item.productId]) || 0;
+                          const qty    = Number(draftQtys[item._key])  || 0;
+                          const rate   = Number(draftRates[item._key]) || 0;
                           const amount = qty * rate;
 
                           return (
-                            <div key={item.productId} className="rounded-lg border border-border overflow-hidden">
+                            <div key={item._key} className="rounded-lg border border-border overflow-hidden">
                               {/* Product header */}
                               <div className="flex items-center gap-2 px-4 py-2.5 bg-brand/5 border-b border-border">
                                 <span className="text-xs font-semibold text-brand uppercase tracking-wide">
@@ -949,26 +799,62 @@ export function CreateJobWorkPage() {
                         </button>
                       </>
                     ) : (
-                      /* ── SINGLE-ITEM: editable form as before ── */
-                      pendingRefItems.map((item, itemIndex) => {
+                      /* ── SINGLE-ITEM: editable form ── */
+                      pendingRefItems.map((item) => {
                         const cat            = categories.find((c) => c.id === item.categoryId);
                         const prod           = products.find((p) => p.id === item.productId);
                         const activeVariants = prod?.variants.filter((v) => v.status === 'Active') ?? [];
                         const variantOptions = activeVariants.length > 0 ? activeVariants : (prod?.variants ?? []);
                         const hasMultipleVariants = variantOptions.length > 1;
+
+                        // selectedVariantId: prefer what the user last picked (stored by _key),
+                        // then the ref's own variantId, then first available.
                         const selectedVariantId =
-                          draftVariants[item.productId] ||
+                          draftVariants[item._key] ||
+                          item._resolvedVariant ||
                           item.variantId ||
                           variantOptions[0]?.id ||
                           '';
-                        const qty    = draftQtys[item.productId]  ?? '';
-                        const rate   = draftRates[item.productId] ?? '';
+
+                        const qty    = draftQtys[item._key]  ?? '';
+                        const rate   = draftRates[item._key] ?? '';
                         const amount = (Number(qty) || 0) * (Number(rate) || 0);
                         const hasQty = Number(qty) > 0;
-                        const isFirst = itemIndex === 0;
+
+                        // When variant changes we need to update the draft key.
+                        // Because key encodes the variant, we rebuild key on variant toggle.
+                        const handleVariantChange = (newVariantId: string) => {
+                          const oldKey = item._key;
+                          const newKey = makeItemKey(item.productId, newVariantId, item._idx);
+                          if (oldKey === newKey) return;
+                          setDraftVariants((prev) => {
+                            const next = { ...prev };
+                            delete next[oldKey];
+                            next[newKey] = newVariantId;
+                            return next;
+                          });
+                          setDraftQtys((prev) => {
+                            const next = { ...prev };
+                            next[newKey] = next[oldKey] ?? '';
+                            delete next[oldKey];
+                            return next;
+                          });
+                          setDraftRates((prev) => {
+                            const next = { ...prev };
+                            next[newKey] = next[oldKey] ?? '';
+                            delete next[oldKey];
+                            return next;
+                          });
+                          setDraftWeights((prev) => {
+                            const next = { ...prev };
+                            next[newKey] = next[oldKey] ?? '';
+                            delete next[oldKey];
+                            return next;
+                          });
+                        };
 
                         return (
-                          <div key={item.productId} className="rounded-lg border border-border overflow-hidden">
+                          <div key={item._key} className="rounded-lg border border-border overflow-hidden">
                             {/* Product header */}
                             <div className="flex items-center gap-2 px-4 py-2.5 bg-brand/5 border-b border-border">
                               <span className="text-xs font-semibold text-brand uppercase tracking-wide">
@@ -991,9 +877,7 @@ export function CreateJobWorkPage() {
                                       <button
                                         key={v.id}
                                         type="button"
-                                        onClick={() =>
-                                          setDraftVariants((prev) => ({ ...prev, [item.productId]: v.id }))
-                                        }
+                                        onClick={() => handleVariantChange(v.id)}
                                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 ${
                                           selectedVariantId === v.id
                                             ? 'bg-brand text-white border-brand shadow-sm'
@@ -1040,10 +924,9 @@ export function CreateJobWorkPage() {
                                   type="number"
                                   min={0}
                                   step="0.01"
-                                  data-product-rate={item.productId}
+                                  data-product-rate={item._key}
                                   value={rate}
-                                  autoFocus={isFirst}
-                                  onChange={(e) => setDraftRates((prev) => ({ ...prev, [item.productId]: e.target.value }))}
+                                  onChange={(e) => setDraftRates((prev) => ({ ...prev, [item._key]: e.target.value }))}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
                                       e.preventDefault();
@@ -1051,7 +934,7 @@ export function CreateJobWorkPage() {
                                         focusNextInForm(e.currentTarget, true);
                                       } else {
                                         const qtyInput = formRef.current?.querySelector<HTMLInputElement>(
-                                          `input[data-product-qty="${item.productId}"]`
+                                          `input[data-product-qty="${item._key}"]`
                                         );
                                         qtyInput?.focus();
                                       }
@@ -1072,16 +955,16 @@ export function CreateJobWorkPage() {
                                   <input
                                     type="number"
                                     min={0}
-                                    data-product-qty={item.productId}
+                                    data-product-qty={item._key}
                                     value={qty}
-                                    onChange={(e) => setDraftQtys((prev) => ({ ...prev, [item.productId]: e.target.value }))}
+                                    onChange={(e) => setDraftQtys((prev) => ({ ...prev, [item._key]: e.target.value }))}
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter') {
                                         e.preventDefault();
                                         if (e.shiftKey) {
                                           focusNextInForm(e.currentTarget, true);
                                         } else if (hasQty) {
-                                          addRefItemToJob(item.productId, selectedVariantId);
+                                          addRefItemToJob(item._key, item.productId, selectedVariantId);
                                         }
                                       }
                                     }}
@@ -1106,12 +989,19 @@ export function CreateJobWorkPage() {
                                 </div>
                               </div>
 
-                              {/* Add button */}
+                              {/* Add button — ref'd so it can be auto-focused for single-item refs */}
                               <div>
                                 <button
+                                  ref={addSingleBtnRef}
                                   type="button"
                                   disabled={!hasQty}
-                                  onClick={() => addRefItemToJob(item.productId, selectedVariantId)}
+                                  onClick={() => addRefItemToJob(item._key, item.productId, selectedVariantId)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && hasQty) {
+                                      e.preventDefault();
+                                      addRefItemToJob(item._key, item.productId, selectedVariantId);
+                                    }
+                                  }}
                                   className={`w-full flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors
                                     ${hasQty
                                       ? 'bg-brand text-white hover:bg-brand/90 focus:outline-none focus:ring-2 focus:ring-brand/40'
@@ -1182,6 +1072,16 @@ export function CreateJobWorkPage() {
                                         <span className="text-xs text-muted">
                                           — {items.length} product{items.length !== 1 ? 's' : ''}
                                         </span>
+                                        <button
+                                          type="button"
+                                          tabIndex={-1}
+                                          onClick={() => removeRefGroup(refNum)}
+                                          className="ml-auto flex items-center gap-1 text-xs text-muted hover:text-red-500 transition-colors px-1.5 py-0.5 rounded hover:bg-red-50"
+                                          title={`Remove all items from ${refNum}`}
+                                        >
+                                          <Trash2 size={11} />
+                                          <span>Remove group</span>
+                                        </button>
                                       </div>
                                     </td>
                                   </tr>

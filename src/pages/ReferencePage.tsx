@@ -83,7 +83,11 @@ export function ReferencesPage() {
                 const totalPieces = items.reduce((s, i) => s + i.pieces, 0);
                 return (
                   <tr key={ref.id} className={`border-b border-border hover:bg-surface/50 ${isUsed ? 'opacity-60' : ''}`}>
-                    <td className="px-4 py-3 font-semibold text-brand">{ref.referenceNumber}</td>
+                    <td className="px-4 py-3">
+                      <Link to={`/references/${ref.id}`} className="font-semibold text-brand hover:underline">
+                        {ref.referenceNumber}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-0.5">
                         {items.map((item, idx) => {
@@ -216,7 +220,7 @@ function ReferenceForm({
   const draftVariants    = draftProductData?.variants.filter((v) => v.status === 'Active') ?? [];
 
   const canAddItem = !!draftCategoryId && !!draftProductId && !!draftPieces;
-  const canSave    = !!refNumber && items.length > 0 && !refError;
+  const canSave    = !!refNumber && items.length > 0 && !refError && !!totalWeight && Number(totalWeight) > 0;
 
   // ESC → cancel (same as clicking the Cancel button)
   useEscapeBack(onCancel);
@@ -311,16 +315,17 @@ function ReferenceForm({
           <div className="flex items-start gap-4 flex-wrap">
             <div className="flex-1 min-w-[180px] max-w-xs">
               <Input
-                label="Total Weight (kg) — optional"
+                label="Total Weight (kg) *"
                 type="number"
                 min="0"
                 step="0.001"
                 value={totalWeight}
                 onChange={(e) => setTotalWeight(e.target.value)}
                 placeholder="e.g. 12.500"
+                required
               />
               <p className="text-xs text-muted mt-1">
-                Enter the total weight for this entire reference (not per subproduct).
+                Required — enter the total weight for this entire reference (not per subproduct).
               </p>
             </div>
             {totalWeight && Number(totalWeight) > 0 && (
@@ -450,6 +455,9 @@ function ReferenceForm({
           </button>
           <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
         </div>
+        {!canSave && !!refNumber && items.length > 0 && (!totalWeight || Number(totalWeight) <= 0) && (
+          <p className="text-xs text-orange-600 mt-2">Enter a total weight to save.</p>
+        )}
       </form>
     </div>
   );
@@ -587,6 +595,203 @@ export function EditReferencePage() {
           returnPath={selfPath}
         />
       </Card>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// View page (read-only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function ViewReferencePage() {
+  const { id }     = useParams<{ id: string }>();
+  const navigate   = useNavigate();
+  const references = useAppStore((s) => s.references);
+  const categories = useAppStore((s) => s.categories);
+  const products   = useAppStore((s) => s.products);
+  const jobWorks   = useAppStore((s) => s.jobWorks);
+
+  const ref = references.find((r) => r.id === id);
+
+  if (!ref) {
+    return (
+      <div>
+        <PageHeader title="View Reference" />
+        <Card className="p-6">
+          <p className="text-sm text-muted">Reference not found.</p>
+          <Button className="mt-4" onClick={() => navigate('/references')}>Back to References</Button>
+        </Card>
+      </div>
+    );
+  }
+
+  const items       = resolveItems(ref);
+  const totalPieces = items.reduce((s, i) => s + i.pieces, 0);
+
+  // Jobs that use this reference
+  const linkedJobs = jobWorks.filter(
+    (j) => j.reference?.trim().toLowerCase() === ref.referenceNumber.trim().toLowerCase(),
+  );
+
+  const isUsed = linkedJobs.length > 0;
+
+  return (
+    <div>
+      <PageHeader
+        title={`Reference — ${ref.referenceNumber}`}
+        subtitle="View only"
+        action={
+          <div className="flex items-center gap-2">
+            {!isUsed && (
+              <Link to={`/references/${ref.id}/edit`}>
+                <Button variant="outline">
+                  <Pencil size={14} className="mr-1.5" />
+                  Edit
+                </Button>
+              </Link>
+            )}
+            <Button variant="outline" onClick={() => navigate('/references')}>
+              ← Back
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="space-y-5 max-w-3xl">
+
+        {/* ── Header card ── */}
+        <Card className="p-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Reference Number</p>
+              <p className="text-2xl font-bold text-brand">{ref.referenceNumber}</p>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Status</p>
+              {isUsed
+                ? <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-gray-100 text-gray-500 border-gray-200">Used</span>
+                : <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-green-50 text-green-700 border-green-200">Available</span>
+              }
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Created</p>
+              <p className="text-sm font-medium text-charcoal">{formatDate(ref.createdDate)}</p>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Total Pieces</p>
+              <p className="text-sm font-medium text-charcoal">{totalPieces.toLocaleString('en-IN')}</p>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Weight (kg)</p>
+              <p className="text-sm font-medium text-charcoal">
+                {ref.weight != null
+                  ? `${ref.weight.toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`
+                  : '—'}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Remarks</p>
+              <p className="text-sm text-charcoal">{ref.remarks ?? '—'}</p>
+            </div>
+
+          </div>
+        </Card>
+
+        {/* ── Subproducts table ── */}
+        <Card>
+          <div className="px-5 pt-5 pb-3">
+            <h3 className="text-sm font-semibold text-charcoal">
+              Subproducts
+              <span className="ml-2 text-xs font-normal text-muted">({items.length} item{items.length !== 1 ? 's' : ''})</span>
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface">
+                  {['#', 'Product', 'Subproduct', 'Variant', 'Pieces'].map((h) => (
+                    <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, idx) => {
+                  const cat  = categories.find((c) => c.id === item.categoryId);
+                  const prod = products.find((p) => p.id === item.productId);
+                  const vari = prod?.variants.find((v) => v.id === item.variantId);
+                  return (
+                    <tr key={idx} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-muted text-xs">{idx + 1}</td>
+                      <td className="px-4 py-3 text-muted">{cat?.name ?? '—'}</td>
+                      <td className="px-4 py-3 font-medium text-charcoal">{prod?.name ?? '—'}</td>
+                      <td className="px-4 py-3 text-muted">{vari?.name ?? '—'}</td>
+                      <td className="px-4 py-3 font-semibold text-charcoal">{item.pieces.toLocaleString('en-IN')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-brand/5 border-t-2 border-brand/20">
+                  <th colSpan={4} className="text-left px-4 py-3 text-xs font-bold text-charcoal uppercase tracking-wide">Total</th>
+                  <th className="text-left px-4 py-3 text-sm font-bold text-brand">{totalPieces.toLocaleString('en-IN')}</th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Card>
+
+        {/* ── Linked job works ── */}
+        {linkedJobs.length > 0 && (
+          <Card>
+            <div className="px-5 pt-5 pb-3">
+              <h3 className="text-sm font-semibold text-charcoal">
+                Used in Job Works
+                <span className="ml-2 text-xs font-normal text-muted">({linkedJobs.length})</span>
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface">
+                    {['Job Number', 'Status', 'Process', 'Created'].map((h) => (
+                      <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {linkedJobs.map((job) => (
+                    <tr key={job.id} className="border-b border-border last:border-0 hover:bg-surface/50">
+                      <td className="px-4 py-3">
+                        <Link to={`/job-works/${job.id}`} className="font-medium text-brand hover:underline">
+                          {job.jobNumber}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold
+                          ${job.status === 'Completed' ? 'bg-green-50 text-green-700 border-green-200'
+                          : job.status === 'Overdue'   ? 'bg-red-50 text-red-700 border-red-200'
+                          : job.status === 'Sent'      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-muted">{job.process}</td>
+                      <td className="px-4 py-3 text-muted">{formatDate(job.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
+
+      </div>
     </div>
   );
 }

@@ -539,6 +539,9 @@ export function EditJobWorkPage() {
   const navigate     = useNavigate();
   const jobWorks     = useAppStore((s) => s.jobWorks);
   const vendors      = useAppStore((s) => s.vendors);
+  const products     = useAppStore((s) => s.products);
+  const dispatches   = useAppStore((s) => s.dispatches);
+  const receipts     = useAppStore((s) => s.receipts);
   const updateJobWork = useAppStore((s) => s.updateJobWork);
 
   const job = jobWorks.find((j) => j.id === id);
@@ -618,97 +621,247 @@ export function EditJobWorkPage() {
         </span>
       </div>
 
-      <form onSubmit={handleSubmit} data-form>
-        <Card className="p-6 max-w-2xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Job number — read-only */}
-            <Input
-              label="Job Number"
-              value={job.jobNumber}
-              disabled
-              tabIndex={-1}
-            />
+      <div className="space-y-6">
 
-            <SearchableSelect
-              label="Vendor *"
-              value={vendorId}
-              onChange={setVendorId}
-              placeholder="Search vendor…"
-              options={vendors.map((v) => ({ value: v.id, label: v.name }))}
-              tabIndex={1}
-            />
-
-            <Select
-              label="Process"
-              value={process}
-              tabIndex={2}
-              onChange={(e) => setProcess(e.target.value)}
-              options={[
-                { value: 'Printing',   label: 'Printing'   },
-                { value: 'Packaging',  label: 'Packaging'  },
-              ]}
-            />
-
-            <Select
-              label="Priority"
-              value={priority}
-              tabIndex={3}
-              onChange={(e) => setPriority(e.target.value as 'Normal' | 'High' | 'Urgent')}
-              options={[
-                { value: 'Normal', label: 'Normal' },
-                { value: 'High',   label: 'High'   },
-                { value: 'Urgent', label: 'Urgent' },
-              ]}
-            />
-
-            <Input
-              label="Issue Date"
-              type="date"
-              value={issueDate}
-              tabIndex={4}
-              onChange={(e) => setIssueDate(e.target.value)}
-            />
-
-            <Input
-              label="Expected Return Date *"
-              type="date"
-              value={expectedDate}
-              tabIndex={5}
-              onChange={(e) => setExpectedDate(e.target.value)}
-              required
-            />
-
-            <div className="md:col-span-2">
-              <Textarea
-                label="Remarks"
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                placeholder="Optional notes"
+        {/* ── Editable fields ── */}
+        <form onSubmit={handleSubmit} data-form>
+          <Card className="p-6 max-w-2xl">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Job number — read-only */}
+              <Input
+                label="Job Number"
+                value={job.jobNumber}
+                disabled
+                tabIndex={-1}
               />
-            </div>
-          </div>
 
-          <div className="mt-6 flex gap-3">
-            <Button
-              ref={submitRef}
-              type="submit"
-              disabled={!canSave}
-            >
-              Save Changes
-              {canSave && (
-                <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate(`/job-works/${job.id}`)}
-            >
-              Cancel
-            </Button>
+              <SearchableSelect
+                label="Vendor *"
+                value={vendorId}
+                onChange={setVendorId}
+                placeholder="Search vendor…"
+                options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+                tabIndex={1}
+              />
+
+              <Select
+                label="Process"
+                value={process}
+                tabIndex={2}
+                onChange={(e) => setProcess(e.target.value)}
+                options={[
+                  { value: 'Printing',   label: 'Printing'   },
+                  { value: 'Packaging',  label: 'Packaging'  },
+                ]}
+              />
+
+              <Select
+                label="Priority"
+                value={priority}
+                tabIndex={3}
+                onChange={(e) => setPriority(e.target.value as 'Normal' | 'High' | 'Urgent')}
+                options={[
+                  { value: 'Normal', label: 'Normal' },
+                  { value: 'High',   label: 'High'   },
+                  { value: 'Urgent', label: 'Urgent' },
+                ]}
+              />
+
+              <Input
+                label="Issue Date"
+                type="date"
+                value={issueDate}
+                tabIndex={4}
+                onChange={(e) => setIssueDate(e.target.value)}
+              />
+
+              <Input
+                label="Expected Return Date *"
+                type="date"
+                value={expectedDate}
+                tabIndex={5}
+                onChange={(e) => setExpectedDate(e.target.value)}
+                required
+              />
+
+              <div className="md:col-span-2">
+                <Textarea
+                  label="Remarks"
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder="Optional notes"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <Button
+                ref={submitRef}
+                type="submit"
+                disabled={!canSave}
+              >
+                Save Changes
+                {canSave && (
+                  <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate(`/job-works/${job.id}`)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        </form>
+
+        {/* ── Read-only: Reference ── */}
+        {job.reference && (
+          <Card className="p-5 max-w-2xl">
+            <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Reference</p>
+            <p className="text-base font-bold text-brand">{job.reference}</p>
+          </Card>
+        )}
+
+        {/* ── Read-only: Line Items ── */}
+        <Card className="max-w-2xl">
+          <div className="px-5 pt-5 pb-3">
+            <p className="text-xs font-semibold text-muted uppercase tracking-wide">
+              Line Items
+              <span className="ml-2 font-normal normal-case text-muted">({job.items.length} item{job.items.length !== 1 ? 's' : ''}) — view only</span>
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface">
+                  {['#', 'Subproduct', 'Variant', 'Sent', 'Received', 'Pending', 'Rate (₹)'].map((h) => (
+                    <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {job.items.map((item, idx) => {
+                  const prod    = products.find((p) => p.id === item.productId);
+                  const variant = prod?.variants.find((v) => v.id === item.variantId);
+                  const pending = Math.max(0, item.sentQuantity - item.receivedQuantity - item.rejectedQuantity - item.lossQuantity);
+                  return (
+                    <tr key={item.id} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-muted text-xs">{idx + 1}</td>
+                      <td className="px-4 py-3 font-medium text-charcoal">{prod?.name ?? '—'}</td>
+                      <td className="px-4 py-3 text-muted">{variant?.name ?? '—'}</td>
+                      <td className="px-4 py-3">{formatQty(item.sentQuantity, prod?.unit ?? '')}</td>
+                      <td className="px-4 py-3 text-success font-medium">{formatQty(item.receivedQuantity, prod?.unit ?? '')}</td>
+                      <td className="px-4 py-3">
+                        <span className={`font-semibold ${pending > 0 ? 'text-orange-600' : 'text-muted'}`}>
+                          {formatQty(pending, prod?.unit ?? '')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-muted">
+                        {item.rate != null ? `₹${item.rate.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-brand/5 border-t-2 border-brand/20">
+                  <td colSpan={3} className="px-4 py-3 text-xs font-bold text-charcoal uppercase tracking-wide">Total</td>
+                  <td className="px-4 py-3 font-bold text-charcoal">
+                    {formatQty(job.items.reduce((s, i) => s + i.sentQuantity, 0), 'Pic')}
+                  </td>
+                  <td className="px-4 py-3 font-bold text-success">
+                    {formatQty(job.items.reduce((s, i) => s + i.receivedQuantity, 0), 'Pic')}
+                  </td>
+                  <td className="px-4 py-3 font-bold text-orange-600">
+                    {formatQty(job.items.reduce((s, i) => s + Math.max(0, i.sentQuantity - i.receivedQuantity - i.rejectedQuantity - i.lossQuantity), 0), 'Pic')}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </Card>
-      </form>
+
+        {/* ── Read-only: Challans ── */}
+        {(() => {
+          const jobDispatches = dispatches.filter((d) => d.jobWorkId === job.id);
+          if (jobDispatches.length === 0) return null;
+          return (
+            <Card className="max-w-2xl">
+              <div className="px-5 pt-5 pb-3">
+                <p className="text-xs font-semibold text-muted uppercase tracking-wide">
+                  Challans
+                  <span className="ml-2 font-normal normal-case text-muted">({jobDispatches.length}) — view only</span>
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-surface">
+                      {['Challan No.', 'Date', 'Vehicle', 'Driver', 'Transport'].map((h) => (
+                        <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {jobDispatches.map((d) => (
+                      <tr key={d.id} className="border-b border-border last:border-0">
+                        <td className="px-4 py-3">
+                          <Link to={`/challans/${d.id}`} className="font-medium text-brand hover:underline">{d.challanNumber}</Link>
+                        </td>
+                        <td className="px-4 py-3 text-muted">{formatDate(d.date)}</td>
+                        <td className="px-4 py-3 text-muted">{d.vehicleNumber || '—'}</td>
+                        <td className="px-4 py-3 text-muted">{d.driver || '—'}</td>
+                        <td className="px-4 py-3 text-muted">{d.transport}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          );
+        })()}
+
+        {/* ── Read-only: Receipts ── */}
+        {(() => {
+          const jobReceipts = receipts.filter((r) => r.jobWorkId === job.id);
+          if (jobReceipts.length === 0) return null;
+          return (
+            <Card className="max-w-2xl">
+              <div className="px-5 pt-5 pb-3">
+                <p className="text-xs font-semibold text-muted uppercase tracking-wide">
+                  Receipts
+                  <span className="ml-2 font-normal normal-case text-muted">({jobReceipts.length}) — view only</span>
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-surface">
+                      {['Date', 'Received By', 'Vendor Challan', 'Remarks'].map((h) => (
+                        <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {jobReceipts.map((r) => (
+                      <tr key={r.id} className="border-b border-border last:border-0">
+                        <td className="px-4 py-3 text-charcoal font-medium">{formatDate(r.date)}</td>
+                        <td className="px-4 py-3 text-muted">{r.receivedBy}</td>
+                        <td className="px-4 py-3 text-muted">{r.vendorChallanNumber ?? '—'}</td>
+                        <td className="px-4 py-3 text-muted">{r.remarks ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          );
+        })()}
+
+      </div>
     </div>
   );
 }

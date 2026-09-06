@@ -1,4 +1,4 @@
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+﻿import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
@@ -14,14 +14,14 @@ import { useAppStore } from '../store/useAppStore';
 import type { Vendor } from '../types';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 
-// ─── Blank form state ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Blank form state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const blankForm = {
   name: '', contactPerson: '', mobile: '', gstNumber: '', specialization: '',
 };
 
 type VendorFormState = typeof blankForm;
 
-// ─── Shared Add / Edit inline form ───────────────────────────────────────────
+// â”€â”€â”€ Shared Add / Edit inline form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function VendorForm({
   initial,
   onSave,
@@ -35,7 +35,7 @@ function VendorForm({
 }) {
   const [form, setForm] = useState(initial);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
-  const canSave = !!form.name && !!form.contactPerson && !!form.mobile;
+  const canSave = !!form.name && !!form.contactPerson;
   const canSaveRef = useRef(canSave);
   canSaveRef.current = canSave;
 
@@ -60,19 +60,19 @@ function VendorForm({
   return (
     <Card className="mb-6 p-6">
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-700">
-        <span className="font-semibold">⌨ Keyboard</span>
-        <span className="text-blue-500">·</span>
-        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> — next field</span>
-        <span className="text-blue-500">·</span>
+        <span className="font-semibold">âŒ¨ Keyboard</span>
+        <span className="text-blue-500">Â·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> â€” next field</span>
+        <span className="text-blue-500">Â·</span>
         <span className="font-semibold text-blue-800">
-          <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> — {saveLabel}
+          <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> â€” {saveLabel}
         </span>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2" data-form>
         <Input label="Vendor Name *"     autoFocus  placeholder="Vendor Name"         {...field('name')} />
         <Input label="Contact Person *"             placeholder="Contact Person"       {...field('contactPerson')} />
-        <Input label="Mobile *"          inputMode="tel" placeholder="Mobile Number"  {...field('mobile')} />
+        <Input label="Mobile" inputMode="tel" placeholder="Mobile Number (optional)"  {...field('mobile')} />
         <Input label="GST Number"                   placeholder="GST Number (optional)" {...field('gstNumber')} />
         <Input label="Specialization"               placeholder="e.g. Printing, Packaging" {...field('specialization')} />
         <div className="flex items-end gap-2">
@@ -87,7 +87,7 @@ function VendorForm({
                 : 'bg-surface text-muted border border-border cursor-not-allowed'}`}
           >
             {saveLabel}
-            {canSave && <kbd className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>}
+            {canSave && <kbd className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+â†µ</kbd>}
           </button>
           <Button variant="outline" className="flex-1" onClick={onCancel}>Cancel</Button>
         </div>
@@ -96,7 +96,7 @@ function VendorForm({
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function VendorsPage() {
   const vendors      = useAppStore((s) => s.vendors);
   const jobWorks     = useAppStore((s) => s.jobWorks);
@@ -110,7 +110,7 @@ export function VendorsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
   const [deleteTargetWarnings, setDeleteTargetWarnings] = useState<string[]>([]);
 
-  // N → open Add Vendor form
+  // N â†’ open Add Vendor form
   useNewItemShortcut(() => setMode((m) => (m === 'add' ? 'idle' : 'add')));
 
   const handleAdd = (data: VendorFormState) => {
@@ -135,7 +135,7 @@ export function VendorsPage() {
         }
       />
 
-      {/* ── Add form ── */}
+      {/* â”€â”€ Add form â”€â”€ */}
       {mode === 'add' && (
         <VendorForm
           initial={blankForm}
@@ -145,7 +145,7 @@ export function VendorsPage() {
         />
       )}
 
-      {/* ── Edit form ── */}
+      {/* â”€â”€ Edit form â”€â”€ */}
       {typeof mode === 'object' && 'edit' in mode && (
         <VendorForm
           initial={{
@@ -250,3 +250,4 @@ export function VendorsPage() {
     </div>
   );
 }
+

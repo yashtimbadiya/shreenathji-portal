@@ -231,12 +231,13 @@ export function SettingsPage() {
             <h3 className="text-base font-semibold">Auto Backup</h3>
           </div>
           <p className="text-xs text-muted mb-5">
-            Point the app to a folder on your computer. Every backup is saved as a new dated file —
-            older ones are never overwritten, giving you a full history (up to 30 files).
-            Backups run automatically when you close the tab and once per day on load.
+            Point the app to a folder on your computer. Every backup is saved as a new dated
+            file — nothing is ever overwritten or deleted, giving you a complete history.
+            Backups run automatically every time you open the app and every time you close it.
             {!supportsFileSystemAccess && (
               <span className="block mt-1 text-orange-600 font-medium">
-                ⚠ Folder access requires Chrome or Edge 86+. Use "Download Backup" to save manually.
+                ⚠ Folder access requires Chrome or Edge 86+. On Firefox/Safari a .xlsx file is
+                downloaded to your Downloads folder automatically instead.
               </span>
             )}
           </p>
@@ -329,12 +330,12 @@ export function SettingsPage() {
             {/* How it works */}
             <div className="rounded-lg bg-surface border border-border px-4 py-3 text-xs text-muted space-y-1.5">
               <p className="font-semibold text-charcoal text-xs">How it works</p>
-              <p>📁 Each backup = a new dated file — old ones are never overwritten.</p>
-              <p>🔄 Auto-runs when you <strong>close the tab</strong> and once <strong>daily on load</strong>.</p>
+              <p>📁 Each backup = a new dated file — nothing is ever overwritten or deleted.</p>
+              <p>🚀 Runs automatically when you <strong>open</strong> the app.</p>
+              <p>🔒 Runs automatically when you <strong>close or switch away</strong> from the tab.</p>
               <p>⚡ Also runs <strong>10 s after any data change</strong> (if folder is set and permission is active).</p>
-              <p>🗂 Up to <strong>30 files</strong> are kept; the oldest are deleted automatically.</p>
               {!supportsFileSystemAccess && (
-                <p className="text-orange-600 font-medium">⚠ Folder backup needs Chrome/Edge 86+.</p>
+                <p className="text-orange-600 font-medium">⚠ Chrome/Edge: saves to folder. Firefox/Safari: downloads to your Downloads folder.</p>
               )}
             </div>
           </div>

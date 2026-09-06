@@ -43,6 +43,7 @@ export function ConfirmDialog({
   onConfirm,
   title,
   message,
+  details,
   confirmLabel = 'Confirm',
   danger,
 }: {
@@ -51,6 +52,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   title: string;
   message: string;
+  /** Optional list of warning lines rendered below the main message */
+  details?: string[];
   confirmLabel?: string;
   danger?: boolean;
 }) {
@@ -71,7 +74,22 @@ export function ConfirmDialog({
         </>
       }
     >
-      <p className="text-sm text-muted">{message}</p>
+      <div className="space-y-3">
+        <p className="text-sm text-muted">{message}</p>
+        {details && details.length > 0 && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5 space-y-1.5">
+            <p className="text-xs font-semibold text-amber-700">The following related data will also be deleted:</p>
+            <ul className="space-y-1">
+              {details.map((d, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs text-amber-700">
+                  <span className="shrink-0 mt-0.5">•</span>
+                  <span>{d}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }

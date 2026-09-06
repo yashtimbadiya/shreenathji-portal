@@ -1,10 +1,14 @@
-import { Download, Printer, Share2 } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Download, Pencil, Printer, Share2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
-import { Card, PageHeader } from '../components/ui/Card';
-import { formatCurrency, formatDate } from '../data/mockData';
+import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan } from '../components/ui/ChallanPrint';
+import { Breadcrumb, Card, PageHeader } from '../components/ui/Card';
+import { Input, Select, Textarea } from '../components/ui/Input';
+import { formatDate } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
 
 export function ChallansPage() {
   const dispatches = useAppStore((s) => s.dispatches);
@@ -50,199 +54,239 @@ export function ChallansPage() {
 
 export function ChallanDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const dispatches = useAppStore((s) => s.dispatches);
-  const jobWorks = useAppStore((s) => s.jobWorks);
-  const vendors = useAppStore((s) => s.vendors);
-  const products = useAppStore((s) => s.products);
+  const jobWorks   = useAppStore((s) => s.jobWorks);
+  const vendors    = useAppStore((s) => s.vendors);
+  const products   = useAppStore((s) => s.products);
   const categories = useAppStore((s) => s.categories);
-  const settings = useAppStore((s) => s.settings);
+  const settings   = useAppStore((s) => s.settings);
 
   const dispatch = dispatches.find((d) => d.id === id);
   if (!dispatch) return <div className="text-center py-16 text-muted">Challan not found</div>;
 
-  const job = jobWorks.find((j) => j.id === dispatch.jobWorkId);
+  const job    = jobWorks.find((j) => j.id === dispatch.jobWorkId);
   const vendor = vendors.find((v) => v.id === job?.vendorId) ?? null;
 
-  const items = dispatch.items
-    .map((di) => {
-      // Prefer matching by jobWorkItemId (unique per row) to avoid collisions when
-      // multiple job items share the same variantId. Fall back to variantId for older records.
-      let jobItem = job?.items.find((ji) => di.jobWorkItemId && di.jobWorkItemId === ji.id);
-      if (!jobItem) jobItem = job?.items.find((ji) => ji.variantId === di.variantId);
-      const product = products.find((p) => p.id === jobItem?.productId)
-        ?? products.find((p) => p.variants.some((v) => v.id === di.variantId));
-      const rate = jobItem?.rate ?? 0;
-      return {
-        product,
-        quantity: di.quantity,
-        weight: di.weight,
-        rate,
-        amount: di.quantity * rate,
-      };
-    })
-    .filter(Boolean);
-
-  const totalAmount = items.reduce((sum, item) => sum + (item?.amount ?? 0), 0);
+  const printData = buildChallanPrintData(dispatch, job, vendor, products, categories, settings);
 
   return (
     <div>
-      {/* Print CSS */}
-      <style>{`
-        @media print {
-          @page {
-            size: A5 landscape;
-            margin: 8mm;
-          }
-          .no-print { display: none !important; }
-          body, html {
-            margin: 0 !important;
-            padding: 0 !important;
-            visibility: hidden;
-          }
-          .challan-print-card {
-            visibility: visible !important;
-            position: fixed !important;
-            inset: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 8mm !important;
-            box-shadow: none !important;
-            border: none !important;
-            overflow: visible !important;
-            background: white !important;
-          }
-          .challan-print-card * { visibility: visible !important; }
-        }
-      `}</style>
+      {/* ── Print CSS: A5 landscape, zero margins, show only #challan-print-area ── */}
+      <style>{CHALLAN_PRINT_CSS}</style>
 
-      {/* Screen-only action bar */}
-      <div className="no-print mb-4 flex items-center gap-4">
+      {/* ── Screen action bar (hidden on print via .no-print) ── */}
+      <div className="no-print mb-6 flex items-center gap-3 flex-wrap">
         <BackButton />
-        <div className="flex gap-2 ml-auto">
-          <Button variant="outline" onClick={() => window.print()}><Printer size={16} /> Print</Button>
-          <Button variant="outline"><Download size={16} /> Download PDF</Button>
-          <Button variant="outline"><Share2 size={16} /> Share</Button>
+        <div className="flex gap-2 ml-auto flex-wrap">
+          <Button variant="outline" onClick={() => navigate(`/challans/${dispatch.id}/edit`)}>
+            <Pencil size={16} /> Edit
+          </Button>
+          <Button variant="outline" onClick={() => printChallan(printData)}>
+            <Printer size={16} /> Print A5
+          </Button>
+          <Button variant="outline">
+            <Download size={16} /> Download PDF
+          </Button>
+          <Button variant="outline">
+            <Share2 size={16} /> Share
+          </Button>
         </div>
       </div>
 
-      {/* A5 Challan Card */}
-      <Card className="challan-print-card max-w-2xl mx-auto p-6 print:shadow-none print:border-0 print:p-0 print:max-w-none print:mx-0">
+      {/* ── Page label (screen only) ── */}
+      <div className="no-print flex items-center justify-between bg-gray-700 rounded-t-xl px-4 py-1.5 text-xs text-gray-300 max-w-[860px] mx-auto">
+        <span className="font-medium">A5 Landscape — Print Preview</span>
+        <span className="font-mono text-gray-400">{dispatch.challanNumber}</span>
+      </div>
 
-        {/* Header: two-column */}
-        <div className="flex items-start justify-between border-b-2 border-brand pb-3 mb-4">
-          <div>
-            <h1 className="text-lg font-bold text-brand">{settings.companyName}</h1>
-            <p className="text-xs text-muted leading-snug mt-0.5">{settings.address}</p>
-            <p className="text-xs text-muted">Ph: {settings.phone} | GST: {settings.gstin}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-base font-bold text-charcoal uppercase tracking-wide">Delivery Challan</p>
-            <p className="text-xs text-muted mt-0.5">No: <span className="font-semibold text-charcoal">{dispatch.challanNumber}</span></p>
-            <p className="text-xs text-muted">Date: <span className="font-semibold text-charcoal">{formatDate(dispatch.date)}</span></p>
-            <p className="text-xs text-muted">Job: <span className="font-semibold text-charcoal">{job?.jobNumber ?? '—'}</span></p>
-            {job?.reference && (
-              <p className="text-xs font-semibold text-brand mt-0.5">Ref: {job.reference}</p>
+      {/* ── A5 preview card — this is also the print target ── */}
+      <div className="max-w-[860px] mx-auto shadow-2xl ring-1 ring-black/10 rounded-b-xl bg-white">
+        <ChallanPrintPreview data={printData} />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit Challan Page
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function EditChallanPage() {
+  const { id }            = useParams<{ id: string }>();
+  const navigate          = useNavigate();
+  const dispatches        = useAppStore((s) => s.dispatches);
+  const jobWorks          = useAppStore((s) => s.jobWorks);
+  const updateDispatch    = useAppStore((s) => s.updateDispatch);
+
+  const dispatch = dispatches.find((d) => d.id === id);
+  const job      = jobWorks.find((j) => j.id === dispatch?.jobWorkId);
+
+  // ── Local form state ──────────────────────────────────────────────────────
+  const [date,          setDate]          = useState(dispatch?.date ?? '');
+  const [transport,     setTransport]     = useState(dispatch?.transport ?? 'Own Vehicle');
+  const [vehicleNumber, setVehicleNumber] = useState(dispatch?.vehicleNumber ?? '');
+  const [driver,        setDriver]        = useState(dispatch?.driver ?? '');
+  const [remarks,       setRemarks]       = useState(dispatch?.remarks ?? '');
+
+  const submitRef = useRef<HTMLButtonElement>(null);
+  const canSave   = !!date;
+
+  // Ctrl+Enter → save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (canSave) submitRef.current?.click();
+        else submitRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [canSave]);
+
+  // ESC → back to challan detail
+  useEscapeBack(() => navigate(dispatch ? `/challans/${dispatch.id}` : '/challans'));
+
+  if (!dispatch) {
+    return (
+      <div className="text-center py-16 text-muted">
+        Challan not found.{' '}
+        <button onClick={() => navigate('/challans')} className="text-brand hover:underline">Back to list</button>
+      </div>
+    );
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSave) return;
+    updateDispatch(dispatch.id, {
+      date,
+      transport,
+      vehicleNumber,
+      driver,
+      remarks: remarks || undefined,
+    });
+    navigate(`/challans/${dispatch.id}`);
+  };
+
+  return (
+    <div>
+      <Breadcrumb
+        items={[
+          { label: 'Challans', path: '/challans' },
+          { label: dispatch.challanNumber, path: `/challans/${dispatch.id}` },
+          { label: 'Edit' },
+        ]}
+      />
+      <PageHeader
+        title={`Edit — ${dispatch.challanNumber}`}
+        subtitle="Update transport, vehicle, and dispatch details."
+      />
+
+      {/* Keyboard hint */}
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-700">
+        <span className="font-semibold">⌨ Keyboard</span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Enter</kbd> — next field</span>
+        <span className="text-blue-500">·</span>
+        <span className="font-semibold text-blue-800">
+          <kbd className="bg-blue-200 px-1.5 py-0.5 rounded font-mono">Ctrl+Enter</kbd> — Save Changes
+        </span>
+        <span className="text-blue-500">·</span>
+        <span><kbd className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">Esc</kbd> — cancel</span>
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        <Card className="p-6 mb-4">
+          {/* Read-only summary */}
+          <div className="mb-5 rounded-lg bg-surface border border-border px-4 py-3 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-muted mb-0.5 uppercase font-semibold tracking-wide">Challan No.</p>
+              <p className="font-semibold text-charcoal">{dispatch.challanNumber}</p>
+            </div>
+            {job && (
+              <div>
+                <p className="text-xs text-muted mb-0.5 uppercase font-semibold tracking-wide">Job Work</p>
+                <p className="font-semibold text-charcoal">{job.jobNumber}</p>
+              </div>
             )}
-          </div>
-        </div>
-
-        {/* Vendor info */}
-        <div className="mb-4 grid grid-cols-2 gap-4 text-xs">
-          <div className="rounded-lg bg-surface border border-border px-3 py-2">
-            <p className="text-muted uppercase font-semibold text-[10px] mb-1">To (Vendor)</p>
-            <p className="font-semibold text-charcoal">{vendor?.name ?? '—'}</p>
-            <p className="text-muted">{vendor?.contactPerson} · {vendor?.mobile}</p>
-            {vendor?.gstNumber && <p className="text-muted">GST: {vendor.gstNumber}</p>}
-          </div>
-          <div className="rounded-lg bg-surface border border-border px-3 py-2">
-            <p className="text-muted uppercase font-semibold text-[10px] mb-1">Transport</p>
-            <p className="font-semibold text-charcoal">{dispatch.transport}</p>
-            {dispatch.vehicleNumber && <p className="text-muted">Vehicle: {dispatch.vehicleNumber}</p>}
-            {dispatch.driver && <p className="text-muted">Driver: {dispatch.driver}</p>}
-            <p className="text-muted">Process: <span className="font-medium text-charcoal">{job?.process ?? '—'}</span></p>
-          </div>
-        </div>
-
-        {/* Items table */}
-        <table className="w-full text-xs mb-4 border border-border">
-          <thead>
-            <tr className="bg-surface">
-              <th className="text-left px-2 py-2 border border-border font-semibold">#</th>
-              <th className="text-left px-2 py-2 border border-border font-semibold">Product</th>
-              <th className="text-left px-2 py-2 border border-border font-semibold">Category</th>
-              <th className="text-right px-2 py-2 border border-border font-semibold">Pieces</th>
-              <th className="text-right px-2 py-2 border border-border font-semibold">Weight (kg)</th>
-              <th className="text-right px-2 py-2 border border-border font-semibold">Rate</th>
-              <th className="text-right px-2 py-2 border border-border font-semibold">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, i) => {
-              const catName = item!.product
-                ? categories.find((c) => c.id === item!.product!.categoryId)?.name ?? '—'
-                : '—';
-              return (
-                <tr key={i}>
-                  <td className="px-2 py-1.5 border border-border text-muted">{i + 1}</td>
-                  <td className="px-2 py-1.5 border border-border font-medium">{item!.product?.name ?? '—'}</td>
-                  <td className="px-2 py-1.5 border border-border text-muted">{catName}</td>
-                  <td className="px-2 py-1.5 border border-border text-right">{item!.quantity.toLocaleString()}</td>
-                  <td className="px-2 py-1.5 border border-border text-right">
-                    {item!.weight != null ? `${item!.weight} kg` : '—'}
-                  </td>
-                  <td className="px-2 py-1.5 border border-border text-right">{formatCurrency(item!.rate ?? 0)}</td>
-                  <td className="px-2 py-1.5 border border-border text-right font-semibold">{formatCurrency(item!.amount ?? 0)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="bg-surface">
-              <td colSpan={3} className="px-2 py-2 border border-border font-bold uppercase text-[10px] tracking-wide">Total</td>
-              <td className="px-2 py-2 border border-border text-right font-bold">
-                {items.reduce((s, i) => s + (i?.quantity ?? 0), 0).toLocaleString()} Pic
-              </td>
-              <td className="px-2 py-2 border border-border text-right font-bold">
-                {items.some((i) => i?.weight != null)
-                  ? `${items.reduce((s, i) => s + (i?.weight ?? 0), 0).toFixed(3)} kg`
-                  : '—'}
-              </td>
-              <td className="px-2 py-2 border border-border" />
-              <td className="px-2 py-2 border border-border text-right font-bold text-brand">{formatCurrency(totalAmount)}</td>
-            </tr>
-          </tfoot>
-        </table>
-
-        {/* Remarks + Total amount */}
-        <div className="flex justify-between items-start mb-6 text-xs">
-          <div>
-            {dispatch.remarks && (
-              <p><span className="text-muted">Remarks:</span> {dispatch.remarks}</p>
-            )}
-          </div>
-          <div className="text-right">
-            <p className="text-muted uppercase font-semibold text-[10px]">Total Amount</p>
-            <p className="text-xl font-bold text-brand">{formatCurrency(totalAmount)}</p>
-          </div>
-        </div>
-
-        {/* Signature lines */}
-        <div className="flex justify-between mt-10 text-xs">
-          <div className="text-center">
-            <div className="w-40 border-t border-charcoal pt-2">
-              <p className="font-medium">Authorized Signature</p>
-              <p className="text-muted">{settings.companyName}</p>
+            <div>
+              <p className="text-xs text-muted mb-0.5 uppercase font-semibold tracking-wide">Items</p>
+              <p className="font-semibold text-charcoal">{dispatch.items.length} line(s)</p>
             </div>
           </div>
-          <div className="text-center">
-            <div className="w-40 border-t border-charcoal pt-2">
-              <p className="font-medium">Vendor Signature</p>
-              <p className="text-muted">{vendor?.name ?? '—'}</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <Input
+              label="Dispatch Date *"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+              tabIndex={1}
+            />
+
+            <Input
+              label="Vehicle Number"
+              value={vehicleNumber}
+              onChange={(e) => setVehicleNumber(e.target.value)}
+              placeholder="e.g. GJ05AX1234"
+              tabIndex={2}
+            />
+
+            <Input
+              label="Driver Name"
+              value={driver}
+              onChange={(e) => setDriver(e.target.value)}
+              placeholder="Driver full name"
+              tabIndex={3}
+            />
+
+            <Select
+              label="Transport"
+              value={transport}
+              tabIndex={4}
+              onChange={(e) => setTransport(e.target.value)}
+              options={[
+                { value: 'Own Vehicle',   label: 'Own Vehicle'   },
+                { value: 'Courier',       label: 'Courier'       },
+                { value: 'Hand Delivery', label: 'Hand Delivery' },
+                { value: 'Third Party',   label: 'Third Party'   },
+              ]}
+            />
+
+            <div className="md:col-span-2">
+              <Textarea
+                label="Remarks"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Optional notes"
+              />
             </div>
           </div>
-        </div>
-      </Card>
+
+          <div className="mt-6 flex gap-3">
+            <Button
+              ref={submitRef}
+              type="submit"
+              disabled={!canSave}
+            >
+              Save Changes
+              {canSave && (
+                <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
+              )}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate(`/challans/${dispatch.id}`)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      </form>
     </div>
   );
 }

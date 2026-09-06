@@ -1,10 +1,10 @@
-import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Search, Tag, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { PageHeader } from '../components/ui/Card';
-import { ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
+import { ConfirmDialog } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import {
   formatDate,
@@ -41,7 +41,12 @@ export function JobWorksPage() {
   const filtered = useMemo(() => {
     return jobWorks.filter((j) => {
       if (statusFilter && j.status !== statusFilter) return false;
-      if (search && !j.jobNumber.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        const matchesJob = j.jobNumber.toLowerCase().includes(q);
+        const matchesRef = j.reference?.toLowerCase().includes(q) ?? false;
+        if (!matchesJob && !matchesRef) return false;
+      }
       return true;
     });
   }, [jobWorks, statusFilter, search]);
@@ -65,7 +70,7 @@ export function JobWorksPage() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
-            placeholder="Search job number..."
+            placeholder="Search job number or reference..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-lg border border-border text-sm focus:outline-none focus:border-brand"
@@ -78,7 +83,7 @@ export function JobWorksPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface sticky top-0">
-                {['Job Number', 'Vendor', 'Process', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Priority', 'Status', ''].map((h) => (
+                {['Job Number', 'Reference', 'Vendor', 'Subproduct', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Priority', 'Status', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                 ))}
               </tr>
@@ -88,13 +93,45 @@ export function JobWorksPage() {
                 const vendor    = vendors.find((v) => v.id === job.vendorId);
                 const unit      = products.find((p) => p.id === job.items[0]?.productId)?.unit ?? 'Pic';
                 const canEdit   = EDITABLE_STATUSES.includes(job.status);
+                // Deduplicated subproduct names for this job
+                const subproductNames = [...new Set(
+                  job.items.map((i) => products.find((p) => p.id === i.productId)?.name).filter(Boolean)
+                )] as string[];
                 return (
                   <tr key={job.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-4 py-3">
                       <Link to={`/job-works/${job.id}`} className="font-medium text-brand hover:underline">{job.jobNumber}</Link>
                     </td>
+                    {/* ── Reference numbers ── */}
+                    <td className="px-4 py-3">
+                      {job.reference ? (
+                        <div className="flex flex-wrap gap-1">
+                          {job.reference.split(',').map((r) => r.trim()).filter(Boolean).map((ref) => (
+                            <span
+                              key={ref}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-brand/8 border border-brand/20 text-brand text-[11px] font-medium whitespace-nowrap"
+                            >
+                              <Tag size={9} className="shrink-0" />
+                              {ref}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">{vendor?.name}</td>
-                    <td className="px-4 py-3">{job.process}</td>
+                    <td className="px-4 py-3">
+                      {subproductNames.length > 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          {subproductNames.map((name) => (
+                            <span key={name} className="text-charcoal">{name}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">{formatQty(getJobSentTotal(job), unit)}</td>
                     <td className="px-4 py-3">{formatQty(getJobReceivedTotal(job), unit)}</td>
                     <td className="px-4 py-3">{formatQty(getJobPendingTotal(job), unit)}</td>
@@ -107,8 +144,8 @@ export function JobWorksPage() {
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={job.status} /></td>
                     <td className="px-4 py-3">
-                      {canEdit && (
-                        <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1">
+                        {canEdit && (
                           <button
                             title="Edit job work"
                             onClick={() => navigate(`/job-works/${job.id}/edit`)}
@@ -116,19 +153,18 @@ export function JobWorksPage() {
                           >
                             <Pencil size={14} />
                           </button>
-                          <button
-                            title="Delete job work"
-                            onClick={() => {
-                              const reasons = checkConstraints(job.id);
-                              // With cascading deletes, always allow deletion — warn if related data will also be removed
-                              setDeleteTarget({ id: job.id, jobNumber: job.jobNumber, cascadeWarnings: reasons });
-                            }}
-                            className="p-1.5 rounded-lg text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      )}
+                        )}
+                        <button
+                          title="Delete job work"
+                          onClick={() => {
+                            const reasons = checkConstraints(job.id);
+                            setDeleteTarget({ id: job.id, jobNumber: job.jobNumber, cascadeWarnings: reasons });
+                          }}
+                          className="p-1.5 rounded-lg text-muted hover:text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -138,25 +174,18 @@ export function JobWorksPage() {
         </div>
       </Card>
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation — always allows proceeding; shows cascade warnings when present */}
       <ConfirmDialog
-        open={deleteTarget !== null && deleteTarget.cascadeWarnings.length === 0}
+        open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => {
           if (deleteTarget) deleteJobWork(deleteTarget.id);
         }}
         title="Delete Job Work"
         message={`Delete ${deleteTarget?.jobNumber ?? 'this job work'}? This cannot be undone.`}
+        details={deleteTarget?.cascadeWarnings.length ? deleteTarget.cascadeWarnings : undefined}
         confirmLabel="Delete"
         danger
-      />
-
-      <BlockedDeleteDialog
-        open={deleteTarget !== null && (deleteTarget?.cascadeWarnings.length ?? 0) > 0}
-        onClose={() => setDeleteTarget(null)}
-        title="Cannot Delete Job Work"
-        entityName={deleteTarget?.jobNumber ?? ''}
-        reasons={deleteTarget?.cascadeWarnings ?? []}
       />
     </div>
   );

@@ -1,28 +1,36 @@
 /**
  * autoBackup.ts
  *
- * Automatic backup to a user-chosen folder using the
- * File System Access API (Chrome/Edge 86+).
+ * Miracle-style automatic backup.
  *
- * Safety model — multiple layers so no data is ever lost:
+ * ─── How it works (mirrors Miracle accounting software behaviour) ───────────
  *
- *  Layer 1 – DAILY       On first page-load each day, backup runs automatically.
- *  Layer 2 – ON CLOSE    visibilitychange + pagehide events write backup when the
- *                         tab is hidden/closed.
- *  Layer 3 – MUTATIONS   After any data-changing operation the app calls
- *                         scheduleBackup(), which debounces a write 10 s later.
- *  Layer 4 – MANUAL      "Backup Now" button in Settings always writes immediately.
- *  Layer 5 – ATOMIC WRITE
- *                         Workbook is built first; only on success do we open the
- *                         writable — so a build error never truncates the existing backup.
+ *  ON EVERY LOAD   — A dated backup is written to the chosen folder as soon as
+ *                    the app opens (if a folder is configured and permission is
+ *                    already granted).  No "once-per-day" gate.
  *
- * File naming — each backup writes a NEW dated file:
- *   snj-backup-YYYY-MM-DD_HH-MM.xlsx
- * so old backups are never overwritten and you get a full history.
- * We keep the last MAX_BACKUPS_TO_KEEP files and delete older ones automatically.
+ *  ON EVERY CLOSE  — When the tab is hidden, navigated away from, or closed,
+ *                    a fresh backup is written immediately.  This is the most
+ *                    important layer: your data is safe the moment you leave.
  *
- * For browsers without File System Access API (Firefox, Safari) layers 1-3 are
- * skipped silently. Use the manual Export button instead.
+ *  AFTER MUTATIONS — scheduleBackup() is called after every create/update/delete.
+ *                    It debounces 10 s so bursts of changes produce one write.
+ *
+ *  MANUAL          — "Backup Now" in Settings always writes immediately.
+ *
+ *  FALLBACK        — For Firefox / Safari (no File System Access API) the hook
+ *                    triggers a browser download on every close so users still
+ *                    get a local copy automatically.
+ *
+ * ─── File naming ─────────────────────────────────────────────────────────────
+ *  snj-backup-YYYY-MM-DD_HH-MM.xlsx
+ *
+ *  Each backup is a NEW file — nothing is ever overwritten or deleted.
+ *  You get a complete history of every session in the folder.
+ *
+ * ─── Atomic write ────────────────────────────────────────────────────────────
+ *  The workbook is fully built before the file is opened for writing.
+ *  A build error never truncates an existing backup.
  */
 
 import * as XLSX from 'xlsx';
@@ -34,22 +42,17 @@ export const supportsFileSystemAccess =
   typeof window !== 'undefined' &&
   'showDirectoryPicker' in window;
 
-// ─── How many dated backups to keep in the chosen folder ─────────────────────
-const MAX_BACKUPS_TO_KEEP = 30;
-
-// ─── Handle persistence ───────────────────────────────────────────────────────
-// We use a raw IDB database (not Dexie) because FileSystemDirectoryHandle objects
-// are structured-cloneable but Dexie's type system doesn't know that.
+// ─── Handle + history persistence (raw IDB — not Dexie) ──────────────────────
 const HANDLE_DB_NAME = 'snj-backup-handle-db';
 const HANDLE_STORE   = 'handles';
 const HANDLE_KEY     = 'backupFolder';
 const HISTORY_STORE  = 'history';
 
 export interface BackupHistoryEntry {
-  filename: string;   // e.g. snj-backup-2026-09-04_14-30.xlsx
-  timestamp: string;  // ISO string
+  filename:    string;   // e.g. snj-backup-2026-09-04_14-30.xlsx
+  timestamp:   string;   // ISO string
   recordCount: number;
-  sizeBytes: number;
+  sizeBytes:   number;
 }
 
 function openHandleDb(): Promise<IDBDatabase> {
@@ -57,12 +60,10 @@ function openHandleDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(HANDLE_DB_NAME, 2);
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(HANDLE_STORE)) {
+      if (!db.objectStoreNames.contains(HANDLE_STORE))
         db.createObjectStore(HANDLE_STORE);
-      }
-      if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+      if (!db.objectStoreNames.contains(HISTORY_STORE))
         db.createObjectStore(HISTORY_STORE, { keyPath: 'filename' });
-      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror   = () => reject(req.error);
@@ -96,7 +97,7 @@ export async function loadDirectoryHandle(): Promise<FileSystemDirectoryHandle |
 export async function clearDirectoryHandle(): Promise<void> {
   try {
     const db = await openHandleDb();
-    return new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const tx  = db.transaction(HANDLE_STORE, 'readwrite');
       const req = tx.objectStore(HANDLE_STORE).delete(HANDLE_KEY);
       req.onsuccess = () => resolve();
@@ -126,7 +127,6 @@ export async function loadBackupHistory(): Promise<BackupHistoryEntry[]> {
       const req = tx.objectStore(HISTORY_STORE).getAll();
       req.onsuccess = () => {
         const all = (req.result as BackupHistoryEntry[]) ?? [];
-        // Sort newest first
         all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
         resolve(all);
       };
@@ -161,9 +161,6 @@ export async function verifyPermission(
     };
     const status = await h.queryPermission({ mode });
     if (status === 'granted') return true;
-    // requestPermission requires a user gesture — only works in handleBackupNow,
-    // not in background timers. We return false here so background tasks skip
-    // gracefully and the user is prompted next time they click "Backup Now".
     const requested = await h.requestPermission({ mode });
     return requested === 'granted';
   } catch {
@@ -183,7 +180,7 @@ export function buildBackupFilename(date?: Date): string {
 
 // ─── Workbook builder ─────────────────────────────────────────────────────────
 interface WorkbookResult {
-  data: ArrayBuffer;
+  data:         ArrayBuffer;
   totalRecords: number;
 }
 
@@ -216,7 +213,7 @@ export async function buildWorkbook(): Promise<WorkbookResult> {
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(jobWorkRows.length ? jobWorkRows : [{}]), 'JobWorks');
 
-  // JobItems (line-level)
+  // JobItems
   const jobItemRows: object[] = [];
   jobWorks.forEach((j) => j.items.forEach((item: JobWorkItem) => {
     jobItemRows.push({
@@ -235,7 +232,7 @@ export async function buildWorkbook(): Promise<WorkbookResult> {
   // Categories
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(categories.length ? categories : [{}]), 'Categories');
 
-  // Products (variants as JSON string)
+  // Products
   const productRows = products.map((p) => ({
     id: p.id, categoryId: p.categoryId, name: p.name, code: p.code,
     unit: p.unit, rate: p.rate ?? '', status: p.status,
@@ -285,7 +282,8 @@ export async function buildWorkbook(): Promise<WorkbookResult> {
   // Info / meta sheet
   const totalRecords =
     jobWorks.length + vendors.length + categories.length + products.length +
-    references.length + dispatches.length + receipts.length + payments.length + sharedVariants.length;
+    references.length + dispatches.length + receipts.length + payments.length +
+    sharedVariants.length;
 
   const metaSheet = XLSX.utils.aoa_to_sheet([
     ['Shreenathji Enterprise — Auto Backup'],
@@ -313,54 +311,23 @@ export async function buildWorkbook(): Promise<WorkbookResult> {
 }
 
 // ─── Timestamp helpers ────────────────────────────────────────────────────────
-const LAST_BACKUP_KEY     = 'snj:last-auto-backup';
-const LAST_BACKUP_DAY_KEY = 'snj:last-auto-backup-day';
+const LAST_BACKUP_KEY = 'snj:last-auto-backup';
 
 export function getLastBackupTime(): string | null {
   return localStorage.getItem(LAST_BACKUP_KEY);
 }
 
 export function setLastBackupTime(): void {
-  const now = new Date().toISOString();
-  localStorage.setItem(LAST_BACKUP_KEY, now);
-  localStorage.setItem(LAST_BACKUP_DAY_KEY, now.slice(0, 10));
+  localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
 }
 
-/** True only if a backup has already run today. */
-export function hasBackedUpToday(): boolean {
-  const day = localStorage.getItem(LAST_BACKUP_DAY_KEY);
-  return day === new Date().toISOString().slice(0, 10);
-}
-
-// ─── Prune old backup files ───────────────────────────────────────────────────
+// ─── Core write — ATOMIC, new dated file every time, NOTHING deleted ─────────
 /**
- * Lists all snj-backup-*.xlsx files in the folder, sorts by name (which is
- * date-ordered), and deletes the oldest ones beyond MAX_BACKUPS_TO_KEEP.
- */
-async function pruneOldBackups(dirHandle: FileSystemDirectoryHandle): Promise<void> {
-  try {
-    const backupFiles: string[] = [];
-    for await (const [name] of (dirHandle as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
-      if (name.startsWith(BACKUP_FILE_PREFIX) && name.endsWith('.xlsx')) {
-        backupFiles.push(name);
-      }
-    }
-    backupFiles.sort(); // lexicographic = chronological (YYYY-MM-DD_HH-MM)
-    const toDelete = backupFiles.slice(0, Math.max(0, backupFiles.length - MAX_BACKUPS_TO_KEEP));
-    for (const name of toDelete) {
-      try {
-        await dirHandle.removeEntry(name);
-      } catch { /* ignore individual failures */ }
-    }
-  } catch { /* non-critical */ }
-}
-
-// ─── Core write — ATOMIC, dated filename ─────────────────────────────────────
-/**
- * Builds the full workbook BEFORE touching the file.  Only if the build
- * succeeds do we open the writable and commit.
+ * Builds the full workbook BEFORE opening the file.
+ * Only on success do we write — a build error never truncates existing backups.
+ * Old files are NEVER deleted; the folder grows indefinitely (Miracle behaviour).
  *
- * Returns the filename on success, null on failure.
+ * Returns the filename written, or null on failure.
  */
 export async function writeBackupToFolder(): Promise<string | null> {
   if (!supportsFileSystemAccess) return null;
@@ -375,7 +342,7 @@ export async function writeBackupToFolder(): Promise<string | null> {
   try {
     result = await buildWorkbook();
   } catch (err) {
-    console.warn('[autoBackup] Workbook build failed — existing backup preserved:', err);
+    console.warn('[autoBackup] Workbook build failed — existing backups preserved:', err);
     return null;
   }
 
@@ -388,18 +355,14 @@ export async function writeBackupToFolder(): Promise<string | null> {
     await writable.close();
 
     setLastBackupTime();
-
-    // Record in history
     await appendHistory({
       filename,
-      timestamp: new Date().toISOString(),
+      timestamp:   new Date().toISOString(),
       recordCount: result.totalRecords,
-      sizeBytes: result.data.byteLength,
+      sizeBytes:   result.data.byteLength,
     });
 
-    // Prune excess files (fire-and-forget)
-    void pruneOldBackups(handle);
-
+    console.info(`[autoBackup] ✓ Saved → ${filename} (${result.totalRecords} records)`);
     return filename;
   } catch (err) {
     console.warn('[autoBackup] File write failed:', err);
@@ -407,7 +370,14 @@ export async function writeBackupToFolder(): Promise<string | null> {
   }
 }
 
-// ─── Fallback: browser download ───────────────────────────────────────────────
+// ─── Fallback: silent browser download ───────────────────────────────────────
+/**
+ * Used when the File System Access API is unavailable (Firefox, Safari) or
+ * when no folder has been configured.
+ *
+ * Triggers a normal browser file download so the user gets a dated .xlsx in
+ * their Downloads folder automatically — no prompts, no clicks needed.
+ */
 export async function triggerDownloadBackup(): Promise<void> {
   const { data, totalRecords } = await buildWorkbook();
   const filename = buildBackupFilename();
@@ -424,17 +394,18 @@ export async function triggerDownloadBackup(): Promise<void> {
   setLastBackupTime();
   await appendHistory({
     filename,
-    timestamp: new Date().toISOString(),
+    timestamp:   new Date().toISOString(),
     recordCount: totalRecords,
-    sizeBytes: data.byteLength,
+    sizeBytes:   data.byteLength,
   });
+  console.info(`[autoBackup] ✓ Downloaded → ${filename}`);
 }
 
 // ─── Debounced mutation backup ────────────────────────────────────────────────
-// Called after every data mutation. Waits 10 s for activity to settle,
-// then writes to the folder if one is configured.
-// Background writes cannot re-request permission — they skip silently if
-// permission has lapsed. The user is prompted next time they click "Backup Now".
+// Called after every data mutation.  Waits 10 s for activity to settle,
+// then writes to the folder if one is configured with active permission.
+// Background writes cannot request permission — they skip silently if the
+// browser has revoked it.  The next "Backup Now" click will re-prompt.
 
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -445,19 +416,17 @@ export function scheduleBackup(): void {
     _debounceTimer = null;
     const handle = await loadDirectoryHandle();
     if (!handle) return;
-    // Only run if we already have permission (no user gesture available here)
     const h = handle as unknown as {
       queryPermission(opts: { mode: string }): Promise<PermissionState>;
     };
     try {
       const status = await h.queryPermission({ mode: 'readwrite' });
-      if (status !== 'granted') return; // permission lapsed — skip silently
+      if (status !== 'granted') return;
     } catch { return; }
     await writeBackupToFolder();
   }, 10_000);
 }
 
-/** Cancel any pending debounced backup (e.g. on logout). */
 export function cancelScheduledBackup(): void {
   if (_debounceTimer !== null) {
     clearTimeout(_debounceTimer);
@@ -465,19 +434,33 @@ export function cancelScheduledBackup(): void {
   }
 }
 
-// ─── Main entry point (daily / on-load) ──────────────────────────────────────
-export async function runAutoBackup(): Promise<'folder' | 'skipped'> {
-  if (!supportsFileSystemAccess) return 'skipped';
-  const handle = await loadDirectoryHandle();
-  if (!handle) return 'skipped';
-  // Same as scheduleBackup — only run if permission is already granted
-  const h = handle as unknown as {
-    queryPermission(opts: { mode: string }): Promise<PermissionState>;
-  };
-  try {
-    const status = await h.queryPermission({ mode: 'readwrite' });
-    if (status !== 'granted') return 'skipped';
-  } catch { return 'skipped'; }
-  const filename = await writeBackupToFolder();
-  return filename ? 'folder' : 'skipped';
+// ─── On-load backup (runs every time the app opens) ──────────────────────────
+/**
+ * Called by useAutoBackup on every mount.
+ * Writes immediately if a folder is configured with active permission.
+ * Unlike the old version there is NO "already backed up today" gate —
+ * every session gets its own backup file.
+ */
+export async function runAutoBackup(): Promise<'folder' | 'download' | 'skipped'> {
+  // FSA path — folder backup
+  if (supportsFileSystemAccess) {
+    const handle = await loadDirectoryHandle();
+    if (handle) {
+      const h = handle as unknown as {
+        queryPermission(opts: { mode: string }): Promise<PermissionState>;
+      };
+      try {
+        const status = await h.queryPermission({ mode: 'readwrite' });
+        if (status === 'granted') {
+          const filename = await writeBackupToFolder();
+          return filename ? 'folder' : 'skipped';
+        }
+      } catch { /* fall through */ }
+    }
+    return 'skipped';
+  }
+
+  // No FSA — don't auto-download on load (that would be annoying).
+  // On-close download is handled by useAutoBackup instead.
+  return 'skipped';
 }

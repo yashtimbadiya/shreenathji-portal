@@ -103,6 +103,7 @@ interface AppState {
   deleteJobWork: (id: string) => void;
 
   createDispatch: (data: Omit<DispatchRecord, 'id' | 'challanNumber'>) => string;
+  updateDispatch: (id: string, data: Partial<Pick<DispatchRecord, 'date' | 'vehicleNumber' | 'driver' | 'transport' | 'remarks'>>) => void;
   createReceipt: (data: Omit<ReceiptRecord, 'id'>) => void;
   loadLocalData: () => Promise<void>;
   recordPayment: (paymentId: string, amount: number) => void;
@@ -751,6 +752,17 @@ export const useAppStore = create<AppState>()(
         get().addToast('Material dispatched successfully');
         scheduleBackup();
         return dispatch.id;
+      },
+
+      updateDispatch: (id, data) => {
+        set((s) => ({
+          dispatches: s.dispatches.map((d) => (d.id !== id ? d : { ...d, ...data })),
+        }));
+        const updated = get().dispatches.find((d) => d.id === id);
+        if (updated) void saveDispatch(updated);
+        get().addActivity('JobWork', updated?.jobWorkId ?? '', 'Challan updated');
+        get().addToast('Challan updated');
+        scheduleBackup();
       },
 
       createReceipt: async (data) => {
