@@ -316,6 +316,10 @@ export const useAppStore = create<AppState>()(
       },
 
       updateCategory: (id, data) => {
+        // Snapshot the old sharedVariantIds BEFORE the update so we can diff
+        const oldCat = get().categories.find((c) => c.id === id);
+        const oldSvIds = new Set(oldCat?.sharedVariantIds ?? []);
+
         set((s) => ({
           categories: s.categories.map((c) => (c.id === id ? { ...c, ...data } : c)),
         }));
@@ -323,6 +327,46 @@ export const useAppStore = create<AppState>()(
         const updated = get().categories.find((c) => c.id === id);
         if (updated) void saveCategory(updated);
         scheduleBackup();
+
+        // ── Propagate newly-added shared variants to all existing sub-products ──
+        // If the category's sharedVariantIds changed, find which SVs are new
+        // (present in the new list but not in the old one) and add them as
+        // ProductVariants to every sub-product under this category that doesn't
+        // already have them.
+        if (data.sharedVariantIds) {
+          const newSvIds = data.sharedVariantIds.filter((sid) => !oldSvIds.has(sid));
+          if (newSvIds.length > 0) {
+            const allSVs    = get().sharedVariants;
+            const subProds  = get().products.filter((p) => p.categoryId === id);
+
+            subProds.forEach((prod) => {
+              const existingSvIds = new Set(
+                prod.variants.map((v) => v.sharedVariantId).filter(Boolean),
+              );
+              newSvIds.forEach((svId) => {
+                if (existingSvIds.has(svId)) return; // already has this variant
+                const sv = allSVs.find((s) => s.id === svId);
+                if (!sv) return;
+                get().addVariant(prod.id, {
+                  name:            sv.name,
+                  sku:             prod.code ? `${prod.code}-${sv.sku}` : sv.sku,
+                  attributes:      sv.attributes,
+                  sharedVariantId: sv.id,
+                  factoryStock:    0,
+                  withVendor:      0,
+                  rejected:        0,
+                  status:          'Active' as const,
+                });
+              });
+            });
+
+            if (subProds.length > 0) {
+              get().addToast(
+                `${newSvIds.length} new variant${newSvIds.length !== 1 ? 's' : ''} added to ${subProds.length} subproduct${subProds.length !== 1 ? 's' : ''}`,
+              );
+            }
+          }
+        }
       },
 
       deleteCategory: (id) => {
@@ -897,8 +941,47 @@ export const useAppStore = create<AppState>()(
         };
         set((s) => ({ sharedVariants: [record, ...s.sharedVariants] }));
         void saveSharedVariant(record);
-        get().addToast(`Shared variant "${sv.name}" added`);
         scheduleBackup();
+
+        // ── Propagate the new shared variant to all sub-products whose parent
+        //    category already includes this SV in its sharedVariantIds list.
+        //    Sub-products that already have a variant with sharedVariantId === record.id
+        //    are skipped (idempotent).
+        const affectedCats = get().categories.filter(
+          (c) => c.sharedVariantIds?.includes(record.id),
+        );
+
+        if (affectedCats.length > 0) {
+          const catIds     = new Set(affectedCats.map((c) => c.id));
+          const subProds   = get().products.filter((p) => catIds.has(p.categoryId));
+          let   addedCount = 0;
+
+          subProds.forEach((prod) => {
+            const alreadyHas = prod.variants.some((v) => v.sharedVariantId === record.id);
+            if (alreadyHas) return;
+            get().addVariant(prod.id, {
+              name:            record.name,
+              sku:             prod.code ? `${prod.code}-${record.sku}` : record.sku,
+              attributes:      record.attributes,
+              sharedVariantId: record.id,
+              factoryStock:    0,
+              withVendor:      0,
+              rejected:        0,
+              status:          'Active' as const,
+            });
+            addedCount++;
+          });
+
+          if (addedCount > 0) {
+            get().addToast(
+              `Shared variant "${sv.name}" added — synced to ${addedCount} subproduct${addedCount !== 1 ? 's' : ''}`,
+            );
+          } else {
+            get().addToast(`Shared variant "${sv.name}" added`);
+          }
+        } else {
+          get().addToast(`Shared variant "${sv.name}" added`);
+        }
       },
 
       seedDefaultSharedVariants: () => {

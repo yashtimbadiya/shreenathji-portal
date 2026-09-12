@@ -91,7 +91,7 @@ export function ProductsPage() {
             </thead>
             <tbody>
               {filtered.map((p) => {
-                const cat = categories.find((c) => c.id === p.categoryId);
+                const cat   = categories.find((c) => c.id === p.categoryId);
                 const stock = p.variants.reduce((s, v) => s + v.factoryStock, 0);
                 return (
                   <tr key={p.id} className="border-b border-border hover:bg-surface/50">
@@ -120,11 +120,8 @@ export function ProductsPage() {
                           type="button"
                           onClick={() => {
                             const reasons = checkConstraints(p.id);
-                            if (reasons.length > 0) {
-                              setBlockedTarget({ name: p.name, reasons });
-                            } else {
-                              setDeleteTarget({ id: p.id, name: p.name });
-                            }
+                            if (reasons.length > 0) setBlockedTarget({ name: p.name, reasons });
+                            else setDeleteTarget({ id: p.id, name: p.name });
                           }}
                           className="text-xs text-muted hover:text-red-500 flex items-center gap-1 transition-colors"
                           title="Delete subproduct"
@@ -144,10 +141,7 @@ export function ProductsPage() {
       <ConfirmDialog
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => {
-          if (deleteTarget) deleteProduct(deleteTarget.id);
-          setDeleteTarget(null);
-        }}
+        onConfirm={() => { if (deleteTarget) deleteProduct(deleteTarget.id); setDeleteTarget(null); }}
         title="Delete Subproduct"
         message={`Delete "${deleteTarget?.name}"? This will remove all its variants and cannot be undone.`}
         confirmLabel="Delete"

@@ -123,11 +123,13 @@ export function SharedVariantsPage() {
     return sharedVariants.filter((sv) => sv.name.toLowerCase().includes(q));
   }, [sharedVariants, search]);
 
-  // Count how many products use each shared variant (by matching variant id)
+  // Count how many subproducts use each shared variant (matched via sharedVariantId back-reference)
   const usageMap = useMemo(() => {
     const map = new Map<string, number>();
     sharedVariants.forEach((sv) => {
-      const count = products.filter((p) => p.variants.some((v) => v.id === sv.id)).length;
+      const count = products.filter((p) =>
+        p.variants.some((v) => v.sharedVariantId === sv.id),
+      ).length;
       map.set(sv.id, count);
     });
     return map;

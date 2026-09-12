@@ -6,7 +6,7 @@ import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 import { Button } from '../components/ui/Button';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { Card, PageHeader } from '../components/ui/Card';
-import { focusNextInForm, Input } from '../components/ui/Input';
+import { Input } from '../components/ui/Input';
 import { BlockedDeleteDialog, ConfirmDialog } from '../components/ui/Modal';
 import { formatDate } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
@@ -140,7 +140,7 @@ interface SharedVariantPanelProps {
   onChange: (ids: string[]) => void;
   /** Ref to the first checkbox — used for keyboard focus from name field */
   firstCheckboxRef: React.RefObject<HTMLInputElement | null>;
-  /** Ref to the save button — Enter on last checkbox lands here */
+  /** Ref to the save button — Enter on last item lands here */
   saveBtnRef: React.RefObject<HTMLButtonElement | null>;
   /** When true the panel shows a red validation border if nothing is selected */
   required?: boolean;
@@ -151,10 +151,15 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
   const addSharedVariant    = useAppStore((s) => s.addSharedVariant);
   const updateSharedVariant = useAppStore((s) => s.updateSharedVariant);
 
-  const [showAddForm,  setShowAddForm]  = useState(false);
-  const [editingId,    setEditingId]    = useState<string | null>(null);
-  const [newSvName,    setNewSvName]    = useState('');
-  const [editSvName,   setEditSvName]   = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingId,   setEditingId]   = useState<string | null>(null);
+  const [newSvName,   setNewSvName]   = useState('');
+  const [editSvName,  setEditSvName]  = useState('');
+
+  /** Index of the keyboard-focused row in activeSharedVariants (-1 = none) */
+  const [focusedIdx, setFocusedIdx] = useState(-1);
+
+  const listRef = useRef<HTMLDivElement>(null);
 
   const activeSharedVariants = useMemo(
     () => sharedVariants.filter((sv) => sv.status === 'Active'),
@@ -169,6 +174,63 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
         ? selectedSvIds.filter((s) => s !== id)
         : [...selectedSvIds, id],
     );
+
+  // ── Scroll focused row into view ─────────────────────────────────────────
+  useEffect(() => {
+    if (focusedIdx < 0 || !listRef.current) return;
+    const rows = listRef.current.querySelectorAll<HTMLElement>('[data-sv-idx]');
+    rows[focusedIdx]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [focusedIdx]);
+
+  // ── Keyboard handler ─────────────────────────────────────────────────────
+  // Only active when the list panel itself (or a child) has focus AND no
+  // inline add/edit form is open — so typing in those inputs works normally.
+  useEffect(() => {
+    if (showAddForm || editingId !== null) return;
+    if (activeSharedVariants.length === 0) return;
+
+    const handler = (e: KeyboardEvent) => {
+      // Only intercept when focus is inside our list panel
+      if (!listRef.current?.contains(document.activeElement)) return;
+      // Don't intercept when an input inside the panel has focus
+      const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input') return;
+
+      if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        e.preventDefault();
+        const step = e.key === 'PageDown' ? 5 : 1;
+        setFocusedIdx((i) => Math.min(activeSharedVariants.length - 1, Math.max(0, i) + step));
+        return;
+      }
+      if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        e.preventDefault();
+        const step = e.key === 'PageUp' ? 5 : 1;
+        setFocusedIdx((i) => Math.max(0, (i < 0 ? activeSharedVariants.length : i) - step));
+        return;
+      }
+      if (e.key === 'Home') { e.preventDefault(); setFocusedIdx(0); return; }
+      if (e.key === 'End')  { e.preventDefault(); setFocusedIdx(activeSharedVariants.length - 1); return; }
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (focusedIdx < 0 || focusedIdx >= activeSharedVariants.length) return;
+        const isLast = focusedIdx === activeSharedVariants.length - 1;
+        toggle(activeSharedVariants[focusedIdx].id);
+        // If on the last item, advance focus to the Save button
+        if (isLast) saveBtnRef.current?.focus();
+        else setFocusedIdx((i) => i + 1);
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        if (focusedIdx >= 0) { e.preventDefault(); e.stopPropagation(); setFocusedIdx(-1); }
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSharedVariants, focusedIdx, showAddForm, editingId, selectedSvIds]);
 
   const handleAddSv = () => {
     const trimmed = newSvName.trim();
@@ -202,6 +264,7 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
 
   return (
     <Card className={`p-6 ${showError ? 'ring-2 ring-red-400 border-red-300' : ''}`}>
+      {/* Header */}
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           <span className="text-brand font-bold text-base">⬡</span>
@@ -219,9 +282,23 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
           </button>
         )}
       </div>
-      <p className="text-xs text-muted mb-3">
+      <p className="text-xs text-muted mb-1">
         Every sub-product under this product will automatically get these shared variants.
       </p>
+
+      {/* Keyboard hint — shown when list is non-empty */}
+      {activeSharedVariants.length > 0 && !showAddForm && editingId === null && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] text-muted">
+          <kbd className="bg-surface border border-border px-1 py-0.5 rounded font-mono">↑ ↓</kbd>
+          <span>navigate</span>
+          <span className="text-border">·</span>
+          <kbd className="bg-surface border border-border px-1 py-0.5 rounded font-mono">PgUp PgDn</kbd>
+          <span>jump 5</span>
+          <span className="text-border">·</span>
+          <kbd className="bg-surface border border-border px-1 py-0.5 rounded font-mono">↵</kbd>
+          <span>select / deselect</span>
+        </div>
+      )}
 
       {showError && (
         <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
@@ -238,7 +315,7 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
             value={newSvName}
             onChange={(e) => setNewSvName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); handleAddSv(); }
+              if (e.key === 'Enter')  { e.preventDefault(); handleAddSv(); }
               if (e.key === 'Escape') { setShowAddForm(false); setNewSvName(''); }
             }}
             placeholder="e.g. M, L, Red, 25mm"
@@ -276,11 +353,18 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
           </button>
         </div>
       ) : (
-        <div className="space-y-2">
+        /* ── Scrollable variant list with keyboard navigation ── */
+        <div
+          ref={listRef}
+          // Make the div focusable so keyboard events fire when user clicks inside
+          tabIndex={0}
+          onFocus={() => { if (focusedIdx < 0 && activeSharedVariants.length > 0) setFocusedIdx(0); }}
+          className="space-y-1.5 max-h-72 overflow-y-auto pr-0.5 focus:outline-none"
+        >
           {activeSharedVariants.map((sv, idx) => {
-            const checked = selectedSvIds.includes(sv.id);
-            const isLast  = idx === activeSharedVariants.length - 1;
-            const isEditing = editingId === sv.id;
+            const checked    = selectedSvIds.includes(sv.id);
+            const isFocused  = idx === focusedIdx;
+            const isEditing  = editingId === sv.id;
 
             if (isEditing) {
               return (
@@ -291,7 +375,7 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
                     value={editSvName}
                     onChange={(e) => setEditSvName(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); handleUpdateSv(sv.id); }
+                      if (e.key === 'Enter')  { e.preventDefault(); handleUpdateSv(sv.id); }
                       if (e.key === 'Escape') { setEditingId(null); setEditSvName(''); }
                     }}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-brand/40 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
@@ -318,41 +402,52 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
             }
 
             return (
-              <label
+              <div
                 key={sv.id}
-                className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors group ${
-                  checked ? 'border-brand/40 bg-brand/5' : 'border-border hover:bg-surface'
-                }`}
+                data-sv-idx={idx}
+                onClick={() => { setFocusedIdx(idx); toggle(sv.id); }}
+                className={`group flex items-center gap-3 rounded-lg border px-3 py-2.5 cursor-pointer
+                            transition-colors select-none
+                            ${checked   ? 'border-brand/40 bg-brand/5' : 'border-border'}
+                            ${isFocused ? 'ring-2 ring-brand/40 ring-offset-0' : ''}
+                            ${!checked && !isFocused ? 'hover:bg-surface' : ''}
+                          `}
               >
+                {/* Checkbox visual */}
+                <div
+                  className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center transition-colors
+                    ${checked
+                      ? 'bg-brand border-brand'
+                      : isFocused
+                        ? 'border-brand/60 bg-white'
+                        : 'border-border bg-white'
+                    }`}
+                >
+                  {checked && <Check size={10} className="text-white" />}
+                  {!checked && isFocused && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand/40" />
+                  )}
+                </div>
+                {/* Hidden real checkbox — keeps firstCheckboxRef wiring working */}
                 <input
                   ref={idx === 0 ? firstCheckboxRef : undefined}
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggle(sv.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      toggle(sv.id);
-                      if (isLast) {
-                        saveBtnRef.current?.focus();
-                      } else {
-                        focusNextInForm(e.currentTarget);
-                      }
-                    }
-                  }}
-                  className="accent-brand shrink-0"
+                  className="sr-only"
+                  tabIndex={-1}
                 />
                 <span className="flex-1 text-sm font-medium text-charcoal">{sv.name}</span>
-                {/* Edit button — only visible on hover */}
+                {/* Edit button — visible on hover */}
                 <button
                   type="button"
-                  onClick={(e) => { e.preventDefault(); startEdit(sv); }}
+                  onClick={(e) => { e.stopPropagation(); startEdit(sv); }}
                   className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted hover:text-brand transition-opacity"
                   title="Edit variant name"
                 >
                   <Pencil size={11} />
                 </button>
-              </label>
+              </div>
             );
           })}
         </div>
