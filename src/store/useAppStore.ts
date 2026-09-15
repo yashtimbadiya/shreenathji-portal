@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { USERS } from '../data/mockData';
+import {
+  USERS,
+  CATEGORIES,
+  PRODUCTS,
+  VENDORS,
+  JOB_WORKS,
+  DISPATCHES,
+  RECEIPTS,
+  PAYMENTS,
+  ACTIVITY_LOGS,
+  STOCK_TRANSACTIONS,
+} from '../data/mockData';
 import {
   fetchCategories,
   fetchJobWorks,
@@ -16,6 +27,7 @@ import {
   saveProduct,
   saveJobWork,
   saveDispatch,
+  saveReceipt,
   savePayment,
   saveActivityLog,
   saveReference,
@@ -33,7 +45,9 @@ import {
   createReceipt as createReceiptRecord,
   saveVendor,
 } from '../api/supabaseSync';
+import { portalDb } from '../api/supabaseClient';
 import { scheduleBackup } from '../api/autoBackup';
+import { formatDocumentNumber, getDocumentSerial } from '../lib/documentNumbering';
 
 import type {
   ActivityLog,
@@ -71,7 +85,10 @@ interface AppState {
   stockTransactions: StockTransaction[];
   toasts: Toast[];
   jobCounter: number;
+  availableJobNumbers: number[];
+  jobNumberPoolYear: number;
   challanCounter: number;
+  receiptCounter: number;
 
   login: (email: string, password: string) => boolean;
   logout: () => void;
@@ -221,7 +238,10 @@ const BOOTSTRAP_STATE = {
   sharedVariants: [] as SharedVariant[],
   stockTransactions: [] as StockTransaction[],
   jobCounter: 0,
+  availableJobNumbers: [] as number[],
+  jobNumberPoolYear: new Date().getFullYear(),
   challanCounter: 0,
+  receiptCounter: 0,
 };
 
 export const useAppStore = create<AppState>()(
@@ -243,7 +263,10 @@ export const useAppStore = create<AppState>()(
       stockTransactions: BOOTSTRAP_STATE.stockTransactions,
       toasts: [],
       jobCounter: BOOTSTRAP_STATE.jobCounter,
+      availableJobNumbers: BOOTSTRAP_STATE.availableJobNumbers,
+      jobNumberPoolYear: BOOTSTRAP_STATE.jobNumberPoolYear,
       challanCounter: BOOTSTRAP_STATE.challanCounter,
+      receiptCounter: BOOTSTRAP_STATE.receiptCounter,
 
       resetStore: () => {
         localStorage.removeItem('shreenathji-portal');
@@ -264,7 +287,10 @@ export const useAppStore = create<AppState>()(
           stockTransactions: BOOTSTRAP_STATE.stockTransactions,
           toasts: [],
           jobCounter: BOOTSTRAP_STATE.jobCounter,
+          availableJobNumbers: BOOTSTRAP_STATE.availableJobNumbers,
+          jobNumberPoolYear: BOOTSTRAP_STATE.jobNumberPoolYear,
           challanCounter: BOOTSTRAP_STATE.challanCounter,
+          receiptCounter: BOOTSTRAP_STATE.receiptCounter,
           settings: DEFAULT_SETTINGS,
         });
       },
@@ -418,7 +444,13 @@ export const useAppStore = create<AppState>()(
 
       addProduct: (product) => {
         const normalizedUnit = normalizeProductUnit(product);
-        const p: Product = { ...product, unit: normalizedUnit, id: generateId('p'), variants: [] };
+        const p: Product = {
+          ...product,
+          unit: normalizedUnit,
+          id: generateId('p'),
+          createdAt: new Date().toISOString(),
+          variants: [],
+        };
         set((s) => ({
           products: [p, ...s.products],
           categories: s.categories.map((c) =>
@@ -583,7 +615,7 @@ export const useAppStore = create<AppState>()(
 
       addVendor: async (vendor) => {
         try {
-          const saved = await createVendorRecord(vendor);
+          const saved = await createVendorRecord({ ...vendor, createdAt: new Date().toISOString() });
           if (saved) {
             set((s) => ({ vendors: [saved, ...s.vendors] }));
             get().addToast(`Vendor "${saved.name}" added`);
@@ -651,30 +683,80 @@ export const useAppStore = create<AppState>()(
               fetchSharedVariants(),
             ]);
 
-          const maxJobCounter = (jobWorks ?? []).reduce((max, j) => {
-            const num = parseInt(j.jobNumber.split('-').pop() ?? '0', 10);
+          const currentYear = new Date().getFullYear();
+          const thisSettings = get().settings;
+          const shouldSeedDemoData =
+            categories.length === 0 &&
+            products.length === 0 &&
+            jobWorks.length === 0 &&
+            vendors.length === 0 &&
+            receipts.length === 0 &&
+            dispatches.length === 0 &&
+            payments.length === 0;
+
+          if (shouldSeedDemoData) {
+            await Promise.all([
+              portalDb.categories.bulkPut(CATEGORIES),
+              portalDb.products.bulkPut(PRODUCTS),
+              portalDb.vendors.bulkPut(VENDORS),
+              portalDb.jobWorks.bulkPut(JOB_WORKS),
+              portalDb.dispatches.bulkPut(DISPATCHES),
+              portalDb.receipts.bulkPut(RECEIPTS),
+              portalDb.payments.bulkPut(PAYMENTS),
+              portalDb.activityLogs.bulkPut(ACTIVITY_LOGS),
+            ]);
+          }
+
+          const loadedCategories = shouldSeedDemoData ? CATEGORIES : categories ?? [];
+          const loadedProducts = shouldSeedDemoData ? PRODUCTS : products ?? [];
+          const loadedJobWorks = shouldSeedDemoData ? JOB_WORKS : jobWorks ?? [];
+          const loadedVendors = shouldSeedDemoData ? VENDORS : vendors ?? [];
+          const loadedReceipts = shouldSeedDemoData ? RECEIPTS : receipts ?? [];
+          const loadedDispatches = shouldSeedDemoData ? DISPATCHES : dispatches ?? [];
+          const loadedPayments = shouldSeedDemoData ? PAYMENTS : payments ?? [];
+          const loadedActivityLogs = shouldSeedDemoData ? ACTIVITY_LOGS : activityLogs ?? [];
+          const normalizedReceipts = loadedReceipts.map((receipt, index) =>
+            receipt.receiptNumber
+              ? receipt
+              : { ...receipt, receiptNumber: formatDocumentNumber(thisSettings.receiptPrefix, index + 1) },
+          );
+
+          const maxJobCounter = loadedJobWorks.reduce((max, j) => {
+            const num = getDocumentSerial(j.jobNumber, thisSettings.jobWorkPrefix) ?? 0;
             return num > max ? num : max;
           }, 0);
-          const maxChallanCounter = (dispatches ?? []).reduce((max, d) => {
-            const num = parseInt(d.challanNumber.split('-').pop() ?? '0', 10);
+          const maxChallanCounter = loadedDispatches.reduce((max, d) => {
+            const num = getDocumentSerial(d.challanNumber, thisSettings.challanPrefix) ?? 0;
+            return num > max ? num : max;
+          }, 0);
+          const maxReceiptCounter = normalizedReceipts.reduce((max, r) => {
+            const num = getDocumentSerial(r.receiptNumber ?? '', thisSettings.receiptPrefix) ?? 0;
             return num > max ? num : max;
           }, 0);
 
           set({
-            categories: categories ?? [],
-            products: normalizeProductUnits(products ?? []),
-            jobWorks: jobWorks ?? [],
-            vendors: vendors ?? [],
-            receipts: receipts ?? [],
-            dispatches: dispatches ?? [],
-            payments: payments ?? [],
-            activityLogs: activityLogs ?? [],
+            categories: loadedCategories,
+            products: normalizeProductUnits(loadedProducts),
+            jobWorks: loadedJobWorks,
+            vendors: loadedVendors,
+            receipts: shouldSeedDemoData ? loadedReceipts : normalizedReceipts,
+            dispatches: loadedDispatches,
+            payments: loadedPayments,
+            activityLogs: loadedActivityLogs,
+            stockTransactions: shouldSeedDemoData ? STOCK_TRANSACTIONS : get().stockTransactions,
             references: references ?? [],
             sharedVariants: sharedVariants ?? [],
             jobCounter: maxJobCounter,
+            availableJobNumbers: get().jobNumberPoolYear === currentYear ? get().availableJobNumbers : [],
+            jobNumberPoolYear: currentYear,
             challanCounter: maxChallanCounter,
+            receiptCounter: maxReceiptCounter,
             connectionStatus: 'Local Server Connected',
           });
+
+          normalizedReceipts
+            .filter((_, index) => !receipts?.[index]?.receiptNumber)
+            .forEach((receipt) => void saveReceipt(receipt));
 
           // ── Seed default shared variants if none exist yet (first-time setup)
           if ((sharedVariants ?? []).length === 0) {
@@ -701,8 +783,10 @@ export const useAppStore = create<AppState>()(
       },
 
       createJobWork: (data) => {
-        const counter = get().jobCounter + 1;
-        const jobNumber = `JW-2026-${String(counter).padStart(5, '0')}`;
+        const { availableJobNumbers, jobCounter } = get();
+        const reusableNumber = [...availableJobNumbers].sort((a, b) => a - b)[0];
+        const nextNumber = reusableNumber ?? jobCounter + 1;
+        const jobNumber = formatDocumentNumber(get().settings.jobWorkPrefix, nextNumber);
         const job: JobWork = {
           ...data,
           id: generateId('jw'),
@@ -710,7 +794,14 @@ export const useAppStore = create<AppState>()(
           status: data.status ?? 'Draft',
           createdAt: new Date().toISOString(),
         };
-        set((s) => ({ jobWorks: [job, ...s.jobWorks], jobCounter: counter }));
+        set((s) => ({
+          jobWorks: [job, ...s.jobWorks],
+          jobCounter: reusableNumber == null ? nextNumber : s.jobCounter,
+          jobNumberPoolYear: new Date().getFullYear(),
+          availableJobNumbers: reusableNumber == null
+            ? s.availableJobNumbers
+            : s.availableJobNumbers.filter((number) => number !== reusableNumber),
+        }));
         // persist to IndexedDB
         void saveJobWork(job);
         get().addActivity('JobWork', job.id, `${get().currentUser?.name ?? 'User'} created ${jobNumber}`);
@@ -734,6 +825,7 @@ export const useAppStore = create<AppState>()(
 
       deleteJobWork: (id) => {
         const job = get().jobWorks.find((j) => j.id === id);
+        const deletedNumber = job ? parseInt(job.jobNumber.split('-').pop() ?? '', 10) : NaN;
 
         // Cascade: remove dispatches, receipts, and payments linked to this job work
         const orphanDispatches = get().dispatches.filter((d) => d.jobWorkId === id);
@@ -742,6 +834,10 @@ export const useAppStore = create<AppState>()(
 
         set((s) => ({
           jobWorks: s.jobWorks.filter((j) => j.id !== id),
+          jobNumberPoolYear: new Date().getFullYear(),
+          availableJobNumbers: Number.isFinite(deletedNumber) && deletedNumber > 0 && !s.availableJobNumbers.includes(deletedNumber)
+            ? [...s.availableJobNumbers, deletedNumber]
+            : s.availableJobNumbers,
           dispatches: s.dispatches.filter((d) => !orphanDispatches.some((od) => od.id === d.id)),
           receipts: s.receipts.filter((r) => !orphanReceipts.some((or) => or.id === r.id)),
           payments: s.payments.filter((p) => !orphanPayments.some((op) => op.id === p.id)),
@@ -759,7 +855,7 @@ export const useAppStore = create<AppState>()(
 
       createDispatch: (data) => {
         const counter = get().challanCounter + 1;
-        const challanNumber = `CH-2026-${String(counter).padStart(5, '0')}`;
+        const challanNumber = formatDocumentNumber(get().settings.challanPrefix, counter);
         const dispatch: DispatchRecord = {
           ...data,
           id: generateId('d'),
@@ -811,7 +907,9 @@ export const useAppStore = create<AppState>()(
 
       createReceipt: async (data) => {
         try {
-          const saved = await createReceiptRecord(data);
+          const receiptCounter = get().receiptCounter + 1;
+          const receiptNumber = formatDocumentNumber(get().settings.receiptPrefix, receiptCounter);
+          const saved = await createReceiptRecord({ ...data, receiptNumber });
           if (!saved) {
             get().addToast('Unable to save receipt to local database', 'error');
             return;
@@ -837,7 +935,7 @@ export const useAppStore = create<AppState>()(
               const updatedJob = { ...j, items };
               return { ...updatedJob, status: computeJobStatus(updatedJob) };
             });
-            return { receipts: [saved, ...s.receipts], jobWorks };
+            return { receipts: [saved, ...s.receipts], jobWorks, receiptCounter };
           });
 
           // persist updated job to IndexedDB
@@ -1308,6 +1406,7 @@ export const useAppStore = create<AppState>()(
         currentUser: s.currentUser,
         users: s.users,
         settings: s.settings,
+        availableJobNumbers: s.availableJobNumbers,
         // NOTE: all other data is persisted in IndexedDB and loaded via loadLocalData.
         // We keep only auth + settings in localStorage as a fast bootstrap.
       }),

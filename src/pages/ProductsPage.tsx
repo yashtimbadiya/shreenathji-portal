@@ -10,6 +10,8 @@ import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
 import type { ProductVariant, VariantAttribute } from '../types';
+import { sortByDateDesc } from '../lib/sorting';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Subproducts list page
@@ -31,13 +33,14 @@ export function ProductsPage() {
   useNewItemShortcut(() => navigate('/products/new'));
 
   const filtered = useMemo(() => {
-    return products.filter((p) => {
+    return sortByDateDesc(products.filter((p) => {
       if (categoryFilter && p.categoryId !== categoryFilter) return false;
       if (statusFilter && p.status !== statusFilter) return false;
       if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.code.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
-    });
+    }), (product) => product.createdAt);
   }, [products, search, categoryFilter, statusFilter]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: filtered.length, rowSelector: '[data-product-row="true"]' });
 
   return (
     <div>
@@ -94,7 +97,7 @@ export function ProductsPage() {
                 const cat   = categories.find((c) => c.id === p.categoryId);
                 const stock = p.variants.reduce((s, v) => s + v.factoryStock, 0);
                 return (
-                  <tr key={p.id} className="border-b border-border hover:bg-surface/50">
+                  <tr key={p.id} data-product-row="true" tabIndex={activeRowIndex === filtered.indexOf(p) ? 0 : -1} className={`border-b border-border hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${activeRowIndex === filtered.indexOf(p) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
                     <td className="px-4 py-3">
                       <Link to={`/products/${p.id}`} className="font-medium text-brand hover:underline">{p.name}</Link>
                     </td>

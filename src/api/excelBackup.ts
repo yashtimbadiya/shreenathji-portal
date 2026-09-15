@@ -214,8 +214,9 @@ export async function exportToExcel(): Promise<void> {
   wb.SheetNames = sheetOrder;
 
   // Write and download
-  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob  = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as Uint8Array;
+  const bytes = wbout.buffer.slice(wbout.byteOffset, wbout.byteOffset + wbout.byteLength);
+  const blob  = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const date  = new Date().toISOString().slice(0, 10);
   downloadBlob(blob, `snj-backup-${date}.xlsx`);
 }

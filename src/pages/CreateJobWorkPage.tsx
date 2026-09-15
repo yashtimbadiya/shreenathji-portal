@@ -3,10 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, PageHeader } from '../components/ui/Card';
-import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan } from '../components/ui/ChallanPrint';
+import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan, type PrintOrientation } from '../components/ui/ChallanPrint';
 import { focusNextInForm, Input, SearchableSelect, Select } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
+import { sortByDateDesc } from '../lib/sorting';
+import { PriorityBadge } from '../components/ui/PriorityBadge';
+import { formatDocumentNumber } from '../lib/documentNumbering';
 
 // ─── Session-storage keys (survive round-trip to Add Reference / Category) ───
 const DRAFT_KEY  = 'shjw:create-job-draft-v2';
@@ -82,6 +85,7 @@ function PrintChallanDialog({
   const products   = useAppStore((s) => s.products);
   const categories = useAppStore((s) => s.categories);
   const settings   = useAppStore((s) => s.settings);
+  const [orientation, setOrientation] = useState<PrintOrientation>('vertical');
 
   const printBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -112,7 +116,7 @@ function PrintChallanDialog({
 
   const printData = buildChallanPrintData(dispatch, job, vendor, products, categories, settings);
 
-  const handlePrint  = () => printChallan(printData);
+  const handlePrint  = () => printChallan(printData, orientation);
   const handleViewChallan = () => navigate(`/challans/${challanId}`);
 
   return (
@@ -134,7 +138,7 @@ function PrintChallanDialog({
             <span className="text-green-600 text-lg leading-none">✓</span>
             <div>
               <p className="text-sm font-bold text-green-800">Dispatched Successfully</p>
-              <p className="text-xs text-green-600">{job.jobNumber} · {dispatch.challanNumber}</p>
+              <p className="text-xs text-green-600">{job.jobNumber} · <PriorityBadge priority={job.priority} /> · {dispatch.challanNumber}</p>
             </div>
           </div>
 
@@ -148,6 +152,22 @@ function PrintChallanDialog({
               <ExternalLink size={14} />
               View Challan
             </button>
+            <div className="inline-flex items-center rounded-lg border border-border overflow-hidden" role="group" aria-label="Print orientation">
+              <button
+                type="button"
+                onClick={() => setOrientation('horizontal')}
+                className={`px-3 py-2 text-xs font-medium transition-colors ${orientation === 'horizontal' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-surface'}`}
+              >
+                Horizontal
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrientation('vertical')}
+                className={`px-3 py-2 text-xs font-medium border-l border-border transition-colors ${orientation === 'vertical' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-surface'}`}
+              >
+                Vertical
+              </button>
+            </div>
             <button
               ref={printBtnRef}
               type="button"
@@ -174,12 +194,12 @@ function PrintChallanDialog({
           <div className="rounded-xl shadow-2xl ring-1 ring-black/10 bg-white">
             {/* Page label */}
             <div className="no-print flex items-center justify-between bg-gray-700 rounded-t-xl px-4 py-1.5 text-xs text-gray-300">
-              <span className="font-medium">A5 Landscape — Print Preview</span>
+              <span className="font-medium">A5 {orientation === 'horizontal' ? 'Horizontal' : 'Vertical'} — Print Preview</span>
               <span className="font-mono text-gray-400">{dispatch.challanNumber}</span>
             </div>
 
             {/* The actual A5 content — also the print target */}
-            <ChallanPrintPreview data={printData} />
+            <ChallanPrintPreview data={printData} orientation={orientation} />
           </div>
         </div>
 
@@ -206,8 +226,11 @@ export function CreateJobWorkPage() {
   const createJobWork  = useAppStore((s) => s.createJobWork);
   const createDispatch = useAppStore((s) => s.createDispatch);
   const jobCounter     = useAppStore((s) => s.jobCounter);
+  const availableJobNumbers = useAppStore((s) => s.availableJobNumbers);
+  const jobWorkPrefix = useAppStore((s) => s.settings.jobWorkPrefix);
 
-  const nextJobNumber = `JW-2026-${String(jobCounter + 1).padStart(5, '0')}`;
+  const reusableJobNumber = [...availableJobNumbers].sort((a, b) => a - b)[0];
+  const nextJobNumber = formatDocumentNumber(jobWorkPrefix, reusableJobNumber ?? jobCounter + 1);
 
   // ── Hydrate from sessionStorage ──────────────────────────────────────────
   const saved = loadDraft();
@@ -635,13 +658,20 @@ export function CreateJobWorkPage() {
             <Card className="p-6">
               <h3 className="text-base font-semibold mb-4">Job Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input label="Job Number" value={nextJobNumber} disabled tabIndex={-1} />
+                <div>
+                  <Input label="Job Number" value={nextJobNumber} disabled tabIndex={-1} />
+                  {reusableJobNumber != null && (
+                    <p className="mt-1 text-xs text-green-700">
+                      Available number reused from a deleted job work.
+                    </p>
+                  )}
+                </div>
                 <SearchableSelect
                   label="Vendor *"
                   value={vendorId}
                   onChange={setVendorId}
                   placeholder="Search vendor…"
-                  options={vendors.map((v) => ({ value: v.id, label: v.name }))}
+                  options={sortByDateDesc(vendors, (vendor) => vendor.createdAt).map((v) => ({ value: v.id, label: v.name }))}
                   tabIndex={1}
                   triggerRef={vendorTriggerRef}
                 />

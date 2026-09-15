@@ -9,7 +9,7 @@ import { JobWorksPage } from './pages/JobWorksPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { AddProductPage, ProductsPage, EditProductPage } from './pages/ProductsPage';
-import { ReceivePage, ReceiptHistoryPage } from './pages/ReceivePage';
+import { ReceivePage, ReceiptHistoryPage, ReceiptDetailPage } from './pages/ReceivePage';
 import { VendorDetailPage } from './pages/VendorDetailPage';
 import { VendorsPage } from './pages/VendorsPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -38,6 +38,7 @@ export default function App() {
           <Route index element={<Navigate to="new" replace />} />
           <Route path="new" element={<ReceivePage />} />
           <Route path="history" element={<ReceiptHistoryPage />} />
+          <Route path="history/:id" element={<ReceiptDetailPage />} />
         </Route>
         <Route path="job-works" element={<JobWorksPage />} />
         <Route path="job-works/create" element={<CreateJobWorkPage />} />

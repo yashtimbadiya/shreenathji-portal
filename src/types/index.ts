@@ -80,6 +80,7 @@ export interface Product {
   name: string;
   code: string;
   unit: string;
+  createdAt?: string;
   rate?: number;
   status: 'Active' | 'Disabled';
   variants: ProductVariant[];
@@ -116,6 +117,7 @@ export interface Vendor {
   gstNumber: string;
   specialization: string;
   status: 'Active' | 'Inactive';
+  createdAt?: string;
   address?: string;
 }
 
@@ -161,6 +163,7 @@ export interface DispatchRecord {
 
 export interface ReceiptRecord {
   id: string;
+  receiptNumber?: string;
   jobWorkId: string;
   date: string;
   receivedBy: string;

@@ -7,6 +7,9 @@ import { Modal } from '../components/ui/Modal';
 import { formatQty } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 export function DispatchPage() {
   const [searchParams] = useSearchParams();
@@ -80,11 +83,13 @@ export function DispatchPage() {
               value={jobId}
               onChange={(val) => { setJobId(val); setQuantities({}); }}
               placeholder="Search job number or vendor..."
-              options={jobWorks
-                .filter((j) => j.status !== 'Completed' && j.status !== 'Cancelled')
+              options={sortByDateDesc(
+                jobWorks.filter((j) => j.status !== 'Completed' && j.status !== 'Cancelled'),
+                (job) => job.createdAt,
+              )
                 .map((j) => ({
                   value: j.id,
-                  label: `${j.jobNumber} — ${vendors.find((v) => v.id === j.vendorId)?.name ?? ''}`,
+                  label: `${j.jobNumber} — ${j.priority} — ${vendors.find((v) => v.id === j.vendorId)?.name ?? ''}`,
                 }))}
             />
 
@@ -192,6 +197,8 @@ export function DispatchHistoryPage() {
   const navigate = useNavigate();
   const dispatches = useAppStore((s) => s.dispatches);
   const jobWorks = useAppStore((s) => s.jobWorks);
+  const sortedDispatches = useMemo(() => sortByDateDesc(dispatches, (dispatch) => dispatch.date), [dispatches]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: sortedDispatches.length, rowSelector: '[data-dispatch-row="true"]' });
 
   return (
     <div>
@@ -207,12 +214,15 @@ export function DispatchHistoryPage() {
               </tr>
             </thead>
             <tbody>
-              {dispatches.map((d) => {
+              {sortedDispatches.map((d) => {
                 const job = jobWorks.find((j) => j.id === d.jobWorkId);
                 return (
-                  <tr key={d.id} className="border-b border-border">
+                  <tr key={d.id} data-dispatch-row="true" tabIndex={activeRowIndex === sortedDispatches.indexOf(d) ? 0 : -1} className={`border-b border-border focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${priorityRowClass(job?.priority ?? 'Normal')} ${activeRowIndex === sortedDispatches.indexOf(d) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
                     <td className="px-4 py-3 font-medium text-brand">{d.challanNumber}</td>
-                    <td className="px-4 py-3">{job?.jobNumber}</td>
+                    <td className="px-4 py-3">
+                      <span className="mr-2">{job?.jobNumber}</span>
+                      {job && <PriorityBadge priority={job.priority} />}
+                    </td>
                     <td className="px-4 py-3">{d.date}</td>
                     <td className="px-4 py-3">{d.vehicleNumber}</td>
                     <td className="px-4 py-3">{d.driver}</td>

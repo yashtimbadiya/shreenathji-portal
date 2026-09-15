@@ -21,3 +21,9 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+
+# Local tools / config
+.kiro/

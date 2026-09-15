@@ -1,18 +1,23 @@
 import { Download, Pencil, Printer, Share2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
-import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan } from '../components/ui/ChallanPrint';
+import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan, type PrintOrientation } from '../components/ui/ChallanPrint';
 import { Breadcrumb, Card, PageHeader } from '../components/ui/Card';
 import { Input, Select, Textarea } from '../components/ui/Input';
 import { formatDate } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 export function ChallansPage() {
   const dispatches = useAppStore((s) => s.dispatches);
   const jobWorks = useAppStore((s) => s.jobWorks);
+  const sortedDispatches = useMemo(() => sortByDateDesc(dispatches, (dispatch) => dispatch.date), [dispatches]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: sortedDispatches.length, rowSelector: '[data-challan-row="true"]' });
 
   return (
     <div>
@@ -28,14 +33,17 @@ export function ChallansPage() {
               </tr>
             </thead>
             <tbody>
-              {dispatches.map((d) => {
+              {sortedDispatches.map((d) => {
                 const job = jobWorks.find((j) => j.id === d.jobWorkId);
                 return (
-                  <tr key={d.id} className="border-b border-border">
+                  <tr key={d.id} data-challan-row="true" tabIndex={activeRowIndex === sortedDispatches.indexOf(d) ? 0 : -1} className={`border-b border-border focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${priorityRowClass(job?.priority ?? 'Normal')} ${activeRowIndex === sortedDispatches.indexOf(d) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
                     <td className="px-4 py-3">
                       <Link to={`/challans/${d.id}`} className="font-medium text-brand hover:underline">{d.challanNumber}</Link>
                     </td>
-                    <td className="px-4 py-3">{job?.jobNumber}</td>
+                    <td className="px-4 py-3">
+                      <span className="mr-2">{job?.jobNumber}</span>
+                      {job && <PriorityBadge priority={job.priority} />}
+                    </td>
                     <td className="px-4 py-3">{formatDate(d.date)}</td>
                     <td className="px-4 py-3">{d.vehicleNumber || '—'}</td>
                     <td className="px-4 py-3">
@@ -61,6 +69,7 @@ export function ChallanDetailPage() {
   const products   = useAppStore((s) => s.products);
   const categories = useAppStore((s) => s.categories);
   const settings   = useAppStore((s) => s.settings);
+  const [orientation, setOrientation] = useState<PrintOrientation>('vertical');
 
   const dispatch = dispatches.find((d) => d.id === id);
   if (!dispatch) return <div className="text-center py-16 text-muted">Challan not found</div>;
@@ -82,7 +91,23 @@ export function ChallanDetailPage() {
           <Button variant="outline" onClick={() => navigate(`/challans/${dispatch.id}/edit`)}>
             <Pencil size={16} /> Edit
           </Button>
-          <Button variant="outline" onClick={() => printChallan(printData)}>
+          <div className="inline-flex items-center rounded-lg border border-border overflow-hidden" role="group" aria-label="Print orientation">
+            <button
+              type="button"
+              onClick={() => setOrientation('horizontal')}
+              className={`px-3 py-2 text-xs font-medium transition-colors ${orientation === 'horizontal' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-surface'}`}
+            >
+              Horizontal
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrientation('vertical')}
+              className={`px-3 py-2 text-xs font-medium border-l border-border transition-colors ${orientation === 'vertical' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-surface'}`}
+            >
+              Vertical
+            </button>
+          </div>
+          <Button variant="outline" onClick={() => printChallan(printData, orientation)}>
             <Printer size={16} /> Print A5
           </Button>
           <Button variant="outline">
@@ -96,13 +121,13 @@ export function ChallanDetailPage() {
 
       {/* ── Page label (screen only) ── */}
       <div className="no-print flex items-center justify-between bg-gray-700 rounded-t-xl px-4 py-1.5 text-xs text-gray-300 max-w-[860px] mx-auto">
-        <span className="font-medium">A5 Landscape — Print Preview</span>
-        <span className="font-mono text-gray-400">{dispatch.challanNumber}</span>
+        <span className="font-medium">A5 {orientation === 'horizontal' ? 'Horizontal' : 'Vertical'} — Print Preview</span>
+        <span className="font-mono text-gray-400">{dispatch.challanNumber} {job && <PriorityBadge priority={job.priority} />}</span>
       </div>
 
       {/* ── A5 preview card — this is also the print target ── */}
       <div className="max-w-[860px] mx-auto shadow-2xl ring-1 ring-black/10 rounded-b-xl bg-white">
-        <ChallanPrintPreview data={printData} />
+        <ChallanPrintPreview data={printData} orientation={orientation} />
       </div>
     </div>
   );

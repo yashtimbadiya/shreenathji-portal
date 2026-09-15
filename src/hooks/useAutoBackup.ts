@@ -5,18 +5,13 @@
  *
  * Mirrors Miracle accounting-software backup behaviour:
  *
- *  ON EVERY LOAD  — runAutoBackup() writes a fresh dated file to the configured
- *                   folder as soon as the app opens (no "already backed up today"
- *                   gate — every session produces its own file).
- *
- *  ON EVERY CLOSE — When the user closes the tab, navigates away, or switches
- *                   tabs, a backup is written immediately.
+ *  ON CLOSE / UNLOAD — When the user closes the tab or app, a backup is attempted.
  *                   • Chrome / Edge (FSA supported + folder set)  → folder write
  *                   • Firefox / Safari, OR no folder configured   → browser
  *                     download (.xlsx lands in Downloads folder automatically)
  *
- *  AFTER MUTATIONS — scheduleBackup() is debounced 10 s after every
- *                    create/update/delete in the Zustand store.
+ *  No backups are triggered by load, minimize, tab switching, reload, or data
+ *  mutations.
  *
  *  MANUAL          — "Backup Now" in Settings always calls writeBackupToFolder()
  *                    or triggerDownloadBackup() directly.
@@ -27,7 +22,6 @@
 import { useEffect, useRef } from 'react';
 import {
   supportsFileSystemAccess,
-  runAutoBackup,
   writeBackupToFolder,
   triggerDownloadBackup,
   loadDirectoryHandle,
@@ -35,20 +29,10 @@ import {
 } from '../api/autoBackup';
 
 export function useAutoBackup() {
-  /** Prevents double-firing if both pagehide and visibilitychange fire together */
+  /** Prevents duplicate close/unload attempts during one lifecycle event. */
   const closingRef = useRef(false);
 
-  // ── ON LOAD: write a backup immediately ─────────────────────────────────────
-  useEffect(() => {
-    runAutoBackup().then((result) => {
-      if (result === 'folder') {
-        console.info('[autoBackup] ✓ On-load backup written to folder.');
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── ON CLOSE / HIDE: always write a backup ──────────────────────────────────
+  // ── ON CLOSE / UNLOAD: write one backup ─────────────────────────────────────
   useEffect(() => {
     /**
      * Attempt to write a backup when the app is about to close or be hidden.
@@ -107,39 +91,15 @@ export function useAutoBackup() {
       }
     };
 
-    const resetClosing = () => { closingRef.current = false; };
-
-    // pagehide — most reliable "tab closing / navigating away" event.
-    // Fires even when the browser puts the page into bfcache (back/forward).
+    // pagehide does not fire for minimize or ordinary tab switching.
     const onPageHide = () => {
-      attemptBackupOnClose();
-      resetClosing(); // reset so the next pagehide also fires
-    };
-
-    // visibilitychange — catches tab switches and window minimise.
-    // We write on hide so data is safe even if the OS kills the process
-    // before the tab fully closes.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        attemptBackupOnClose();
-        resetClosing();
-      }
-    };
-
-    // beforeunload — final safety net (synchronous budget, ~50 ms).
-    // Mainly useful as a nudge for the browser to keep the page alive longer.
-    const onBeforeUnload = () => {
       attemptBackupOnClose();
     };
 
     window.addEventListener('pagehide',           onPageHide);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('beforeunload',       onBeforeUnload);
 
     return () => {
       window.removeEventListener('pagehide',           onPageHide);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('beforeunload',       onBeforeUnload);
     };
   }, []);
 }

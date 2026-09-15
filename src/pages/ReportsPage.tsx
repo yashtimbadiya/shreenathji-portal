@@ -1,9 +1,13 @@
 import { useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { Button } from '../components/ui/Button';
 import { Card, CardHeader, PageHeader } from '../components/ui/Card';
 import { Input, Select } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
 import type { JobWork } from '../types';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass } from '../components/ui/PriorityBadge';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 const STATUS_OPTIONS = ['Any', 'Draft', 'Sent', 'Processing', 'Partial', 'Completed', 'Overdue', 'Cancelled', 'Rejected'];
 
@@ -51,7 +55,7 @@ export function ReportsPage() {
   });
 
   const filteredJobWorks = useMemo(() => {
-    return jobWorks.filter((job) => {
+    return sortByDateDesc(jobWorks.filter((job) => {
       if (filters.from   && job.issueDate < filters.from) return false;
       if (filters.to     && job.issueDate > filters.to)   return false;
       if (filters.vendor !== 'all' && job.vendorId !== filters.vendor) return false;
@@ -67,7 +71,7 @@ export function ReportsPage() {
         if (!job.items.some((item) => item.productId === filters.product)) return false;
       }
       return true;
-    });
+    }), (job) => job.createdAt);
   }, [filters, jobWorks, products]);
 
   const filteredJobIds = useMemo(
@@ -132,9 +136,11 @@ export function ReportsPage() {
         paymentAmount: totalPaidAmount,
         remainingAmount,
         paymentStatus: totalAmount > 0 ? getPaymentStatus(paymentEntries) : 'Pending',
+        priority: job.priority,
       };
     });
   }, [filteredDispatches, filteredJobWorks, filteredPayments, filteredReceipts, vendors]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: unifiedReportRows.length, rowSelector: '[data-report-row="true"]' });
 
   // ── Totals row ──────────────────────────────────────────────────────────────
   const totals = useMemo(
@@ -148,32 +154,21 @@ export function ReportsPage() {
     [unifiedReportRows],
   );
 
-  const csvEscape = (value: any) => {
-    const s = value == null ? '' : String(value);
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-
-  const buildCsv = (headers: string[], rows: Array<Array<any>>) => {
-    const headerLine = headers.map(csvEscape).join(',');
-    const bodyLines  = rows.map((row) => row.map(csvEscape).join(','));
-    return [headerLine, ...bodyLines].join('\r\n');
-  };
-
   const getExportData = () => {
     const vendorName = filters.vendor === 'all'
       ? 'all_vendors'
       : vendors.find((v) => v.id === filters.vendor)?.name ?? 'selected_vendor';
     return {
-      filename: `unified_report_${vendorName}_${filters.from}_${filters.to}.csv`,
+      filename: `unified_report_${vendorName}_${filters.from}_${filters.to}.xlsx`,
       headers: [
-        'Vendor', 'City', 'Job Number', 'Process', 'Issue Date', 'Expected Return',
+        'Issue Date', 'Vendor', 'City', 'Job Number', 'Process', 'Expected Return',
         'Status', 'Sent Qty', 'Received Qty', 'Pending Qty',
         'Dispatch Date', 'Receipt Date', 'Payment Type', 'Payment Date',
         'Payment Amount', 'Remaining Amount', 'Payment Status',
       ],
       rows: unifiedReportRows.map((row) => [
-        row.vendor, row.city, row.jobNumber, row.process,
-        row.issueDate, row.expectedReturnDate, row.status,
+        row.issueDate, row.vendor, row.city, row.jobNumber, row.process,
+        row.expectedReturnDate, row.status,
         row.sentQuantity, row.receivedQuantity, row.pendingQuantity,
         row.dispatchDate, row.receiptDate, row.paymentType, row.paymentDate,
         row.paymentAmount, row.remainingAmount, row.paymentStatus,
@@ -181,19 +176,12 @@ export function ReportsPage() {
     };
   };
 
-  const downloadCsv = () => {
+  const downloadExcel = () => {
     const { filename, headers, rows } = getExportData();
-    const csvContent = buildCsv(headers, rows);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url  = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Unified Report');
+    XLSX.writeFile(workbook, filename, { compression: true });
   };
 
   const reportOptions = [
@@ -279,7 +267,7 @@ export function ReportsPage() {
         </p>
         <div className="flex flex-wrap gap-3">
           <Button variant="outline" onClick={() => window.print()}>Print</Button>
-          <Button onClick={downloadCsv}>Download CSV</Button>
+          <Button onClick={downloadExcel}>Download Excel</Button>
         </div>
       </div>
 
@@ -316,11 +304,11 @@ export function ReportsPage() {
           <table className="min-w-full text-sm border-collapse">
             <thead>
               <tr className="border-b-2 border-border bg-surface text-left text-xs font-semibold text-muted uppercase tracking-wide">
+                <th className="px-3 py-3 whitespace-nowrap">Issue Date</th>
                 <th className="px-3 py-3 whitespace-nowrap">Vendor</th>
                 <th className="px-3 py-3 whitespace-nowrap">City</th>
                 <th className="px-3 py-3 whitespace-nowrap">Job</th>
                 <th className="px-3 py-3 whitespace-nowrap">Process</th>
-                <th className="px-3 py-3 whitespace-nowrap">Issue Date</th>
                 <th className="px-3 py-3 whitespace-nowrap">Expected Return</th>
                 <th className="px-3 py-3 whitespace-nowrap">Status</th>
                 <th className="px-3 py-3 whitespace-nowrap text-right">Sent Qty</th>
@@ -344,12 +332,12 @@ export function ReportsPage() {
                 </tr>
               ) : (
                 unifiedReportRows.map((row) => (
-                  <tr key={`${row.vendor}-${row.jobNumber}`} className="hover:bg-surface/50">
+                  <tr key={`${row.vendor}-${row.jobNumber}`} data-report-row="true" tabIndex={activeRowIndex === unifiedReportRows.indexOf(row) ? 0 : -1} className={`hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${priorityRowClass(row.priority)} ${activeRowIndex === unifiedReportRows.indexOf(row) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
+                    <td className="px-3 py-2.5 text-muted whitespace-nowrap">{row.issueDate}</td>
                     <td className="px-3 py-2.5 font-semibold text-charcoal whitespace-nowrap">{row.vendor}</td>
                     <td className="px-3 py-2.5 text-muted whitespace-nowrap">{row.city}</td>
                     <td className="px-3 py-2.5 font-medium text-brand whitespace-nowrap">{row.jobNumber}</td>
                     <td className="px-3 py-2.5 text-muted whitespace-nowrap">{row.process}</td>
-                    <td className="px-3 py-2.5 text-muted whitespace-nowrap">{row.issueDate}</td>
                     <td className="px-3 py-2.5 text-muted whitespace-nowrap">{row.expectedReturnDate}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className="text-muted">{row.status}</span>

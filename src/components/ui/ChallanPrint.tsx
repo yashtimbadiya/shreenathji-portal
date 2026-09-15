@@ -49,6 +49,8 @@ export interface ChallanPrintData {
   settings: Pick<Settings, 'companyName' | 'address' | 'phone' | 'gstin'>;
 }
 
+export type PrintOrientation = 'horizontal' | 'vertical';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
@@ -68,7 +70,13 @@ function fmtDate(iso: string) {
  * All data is passed as props so it can be used inside dialogs, detail pages,
  * and anywhere a print preview is needed.
  */
-export function ChallanPrintPreview({ data }: { data: ChallanPrintData }) {
+export function ChallanPrintPreview({
+  data,
+  orientation = 'horizontal',
+}: {
+  data: ChallanPrintData;
+  orientation?: PrintOrientation;
+}) {
   const { challanNumber, date, jobNumber, reference, process, vendor,
           transport, vehicleNumber, driver, remarks, items, settings } = data;
 
@@ -78,10 +86,12 @@ export function ChallanPrintPreview({ data }: { data: ChallanPrintData }) {
     ? items.reduce((s, i) => s + (i.weight ?? 0), 0)
     : null;
 
-  // ── A5 landscape at 96 dpi → 794 × 560 px ───────────────────────────────
+  const isVertical = orientation === 'vertical';
+
+  // A5 at 96 dpi: horizontal = 794 × 560, vertical = 560 × 794.
   const PAGE: React.CSSProperties = {
-    width:      '794px',
-    minHeight:  '560px',
+    width:      isVertical ? '560px' : '794px',
+    minHeight:  isVertical ? '794px' : '560px',
     padding:    '24px 28px',
     background: '#ffffff',
     fontFamily: "'Segoe UI', Arial, sans-serif",
@@ -365,7 +375,10 @@ export function buildChallanPrintData(
  *
  * The popup is closed automatically after the print dialog dismisses.
  */
-export function printChallan(data: ChallanPrintData): void {
+export function printChallan(
+  data: ChallanPrintData,
+  orientation: PrintOrientation = 'vertical',
+): void {
   const { challanNumber, date, jobNumber, reference, process,
           vendor, transport, vehicleNumber, driver, remarks, items, settings } = data;
 
@@ -409,7 +422,7 @@ export function printChallan(data: ChallanPrintData): void {
   <meta charset="UTF-8"/>
   <title>Challan ${esc(challanNumber)}</title>
   <style>
-    @page { size: A5 landscape; margin: 8mm; }
+    @page { size: A5 ${orientation === 'vertical' ? 'portrait' : 'landscape'}; margin: 8mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI', Arial, sans-serif;

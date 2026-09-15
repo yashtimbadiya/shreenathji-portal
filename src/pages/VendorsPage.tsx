@@ -1,6 +1,6 @@
 ﻿import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { ActiveBadge } from '../components/ui/StatusBadge';
 import { Card, PageHeader } from '../components/ui/Card';
@@ -13,6 +13,8 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import type { Vendor } from '../types';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
+import { sortByDateDesc } from '../lib/sorting';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 // â”€â”€â”€ Blank form state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const blankForm = {
@@ -109,6 +111,8 @@ export function VendorsPage() {
   const [mode, setMode]             = useState<'idle' | 'add' | { edit: Vendor }>('idle');
   const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null);
   const [deleteTargetWarnings, setDeleteTargetWarnings] = useState<string[]>([]);
+  const sortedVendors = useMemo(() => sortByDateDesc(vendors, (vendor) => vendor.createdAt), [vendors]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: sortedVendors.length, rowSelector: '[data-vendor-row="true"]' });
 
   // N â†’ open Add Vendor form
   useNewItemShortcut(() => setMode((m) => (m === 'add' ? 'idle' : 'add')));
@@ -172,20 +176,20 @@ export function VendorsPage() {
               </tr>
             </thead>
             <tbody>
-              {vendors.length === 0 && (
+              {sortedVendors.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-4 py-10 text-center text-sm text-muted">
                     No vendors yet. Click "Add Vendor" to create one.
                   </td>
                 </tr>
               )}
-              {vendors.map((v) => {
+              {sortedVendors.map((v) => {
                 const jobs        = jobWorks.filter((j) => j.vendorId === v.id && !['Completed', 'Cancelled'].includes(j.status));
                 const pending     = jobWorks.filter((j) => j.vendorId === v.id).reduce((s, j) => s + getJobPendingTotal(j), 0);
                 const outstanding = payments.filter((p) => p.vendorId === v.id).reduce((s, p) => s + (p.amount - p.paid), 0);
                 const isEditing   = typeof mode === 'object' && 'edit' in mode && mode.edit.id === v.id;
                 return (
-                  <tr key={v.id} className={`border-b border-border hover:bg-surface/50 ${isEditing ? 'bg-brand/5' : ''}`}>
+                  <tr key={v.id} data-vendor-row="true" tabIndex={activeRowIndex === sortedVendors.indexOf(v) ? 0 : -1} className={`border-b border-border hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${isEditing ? 'bg-brand/5' : ''} ${activeRowIndex === sortedVendors.indexOf(v) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
                     <td className="px-4 py-3">
                       <Link to={`/vendors/${v.id}`} className="font-medium text-brand hover:underline">{v.name}</Link>
                     </td>

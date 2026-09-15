@@ -16,6 +16,9 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import type { JobStatus } from '../types';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
 
 // Jobs in these statuses can be edited or deleted
 const EDITABLE_STATUSES: JobStatus[] = ['Draft', 'Sent'];
@@ -39,7 +42,7 @@ export function JobWorksPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; jobNumber: string; cascadeWarnings: string[] } | null>(null);
 
   const filtered = useMemo(() => {
-    return jobWorks.filter((j) => {
+    return sortByDateDesc(jobWorks.filter((j) => {
       if (statusFilter && j.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -48,8 +51,13 @@ export function JobWorksPage() {
         if (!matchesJob && !matchesRef) return false;
       }
       return true;
-    });
+    }), (job) => job.createdAt);
   }, [jobWorks, statusFilter, search]);
+
+  const activeRowIndex = useListPointerNavigation({
+    itemCount: filtered.length,
+    rowSelector: '[data-job-work-row="true"]',
+  });
 
   const title = statusFilter ? `${statusFilter} Job Works` : 'All Job Works';
 
@@ -83,7 +91,7 @@ export function JobWorksPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface sticky top-0">
-                {['Job Number', 'Reference', 'Vendor', 'Subproduct', 'Sent', 'Received', 'Pending', 'Issue Date', 'Due Date', 'Priority', 'Status', ''].map((h) => (
+                {['Issue Date', 'Job Number', 'Reference', 'Vendor', 'Subproduct', 'Sent', 'Received', 'Pending', 'Due Date', 'Priority', 'Status', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                 ))}
               </tr>
@@ -98,7 +106,13 @@ export function JobWorksPage() {
                   job.items.map((i) => products.find((p) => p.id === i.productId)?.name).filter(Boolean)
                 )] as string[];
                 return (
-                  <tr key={job.id} className="border-b border-border hover:bg-surface/50">
+                  <tr
+                    key={job.id}
+                    data-job-work-row="true"
+                    tabIndex={activeRowIndex === filtered.indexOf(job) ? 0 : -1}
+                    className={`border-b border-border hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${priorityRowClass(job.priority)} ${activeRowIndex === filtered.indexOf(job) ? 'ring-2 ring-inset ring-brand/50' : ''}`}
+                  >
+                    <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                     <td className="px-4 py-3">
                       <Link to={`/job-works/${job.id}`} className="font-medium text-brand hover:underline">{job.jobNumber}</Link>
                     </td>
@@ -135,12 +149,9 @@ export function JobWorksPage() {
                     <td className="px-4 py-3">{formatQty(getJobSentTotal(job), unit)}</td>
                     <td className="px-4 py-3">{formatQty(getJobReceivedTotal(job), unit)}</td>
                     <td className="px-4 py-3">{formatQty(getJobPendingTotal(job), unit)}</td>
-                    <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                     <td className="px-4 py-3">{formatDate(job.expectedReturnDate)}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs font-medium ${job.priority === 'Urgent' ? 'text-red-600' : job.priority === 'High' ? 'text-orange-600' : 'text-muted'}`}>
-                        {job.priority}
-                      </span>
+                      <PriorityBadge priority={job.priority} />
                     </td>
                     <td className="px-4 py-3"><StatusBadge status={job.status} /></td>
                     <td className="px-4 py-3">

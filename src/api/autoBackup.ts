@@ -306,7 +306,8 @@ export async function buildWorkbook(): Promise<WorkbookResult> {
   XLSX.utils.book_append_sheet(wb, metaSheet, 'Info');
   wb.SheetNames = ['Info', ...wb.SheetNames.filter((n) => n !== 'Info')];
 
-  const data = (XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as Uint8Array).buffer as ArrayBuffer;
+  const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as Uint8Array;
+  const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   return { data, totalRecords };
 }
 
@@ -410,21 +411,8 @@ export async function triggerDownloadBackup(): Promise<void> {
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function scheduleBackup(): void {
-  if (!supportsFileSystemAccess) return;
-  if (_debounceTimer !== null) clearTimeout(_debounceTimer);
-  _debounceTimer = setTimeout(async () => {
-    _debounceTimer = null;
-    const handle = await loadDirectoryHandle();
-    if (!handle) return;
-    const h = handle as unknown as {
-      queryPermission(opts: { mode: string }): Promise<PermissionState>;
-    };
-    try {
-      const status = await h.queryPermission({ mode: 'readwrite' });
-      if (status !== 'granted') return;
-    } catch { return; }
-    await writeBackupToFolder();
-  }, 10_000);
+  // Automatic backups are handled by the close/unload lifecycle hook.
+  cancelScheduledBackup();
 }
 
 export function cancelScheduledBackup(): void {

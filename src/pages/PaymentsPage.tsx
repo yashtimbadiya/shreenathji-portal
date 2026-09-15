@@ -9,6 +9,9 @@ import { useAppStore } from '../store/useAppStore';
 import { formatCurrency, formatDate } from '../data/mockData';
 import type { Payment } from '../types';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 const STATUS_TABS = [
   { key: 'all', label: 'All' },
@@ -61,15 +64,15 @@ export function PaymentsPage() {
   // Job works with a bill but ZERO payment entries (never paid at all)
   const unpaidJobs = useMemo(() => {
     const jobsWithPayments = new Set(payments.map((p) => p.jobWorkId));
-    return jobWorks.filter((j) => {
+    return sortByDateDesc(jobWorks.filter((j) => {
       if (jobsWithPayments.has(j.id)) return false;
       return j.items.some((i) => i.sentQuantity > 0 && (i.rate ?? 0) > 0);
-    });
+    }), (job) => job.createdAt);
   }, [jobWorks, payments]);
 
   // Enrich each payment row with cumulative derived status
   const enrichedPayments = useMemo(() => {
-    return payments.map((p) => {
+    return sortByDateDesc(payments.map((p) => {
       const summary = jobSummaries.get(p.jobWorkId);
       const totalBill = summary?.totalBill ?? p.amount;
       const totalPaid = summary?.totalPaid ?? p.paid;
@@ -78,7 +81,7 @@ export function PaymentsPage() {
         : totalPaid > 0 ? 'Partial'
         : 'Pending';
       return { ...p, derivedStatus, totalBill, totalPaid };
-    });
+    }), (payment) => payment.date);
   }, [payments, jobSummaries]);
 
   const filteredPayments = useMemo(() => {
@@ -86,6 +89,7 @@ export function PaymentsPage() {
       (p) => selectedStatus === 'all' || p.derivedStatus === selectedStatus,
     );
   }, [enrichedPayments, selectedStatus]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: filteredPayments.length, rowSelector: '[data-payment-row="true"]' });
 
   const totals = useMemo(() => {
     let billed = 0; let paid = 0;
@@ -195,7 +199,7 @@ export function PaymentsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface">
-                  {['Job Number', 'Vendor', 'Process', 'Issue Date', 'Bill Amount', 'Status', 'Action'].map((h) => (
+                  {['Issue Date', 'Job Number', 'Vendor', 'Process', 'Priority', 'Bill Amount', 'Status', 'Action'].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -205,7 +209,8 @@ export function PaymentsPage() {
                   const vendor = vendors.find((v) => v.id === job.vendorId);
                   const billAmount = job.items.reduce((s, i) => s + i.sentQuantity * (i.rate ?? 0), 0);
                   return (
-                    <tr key={job.id} className="border-b border-border hover:bg-surface/50">
+                    <tr key={job.id} className={`border-b border-border hover:bg-surface/50 ${priorityRowClass(job.priority)}`}>
+                      <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                       <td className="px-4 py-3">
                         <button
                           type="button"
@@ -217,7 +222,7 @@ export function PaymentsPage() {
                       </td>
                       <td className="px-4 py-3">{vendor?.name ?? '—'}</td>
                       <td className="px-4 py-3">{job.process}</td>
-                      <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
+                      <td className="px-4 py-3"><PriorityBadge priority={job.priority} /></td>
                       <td className="px-4 py-3 font-semibold text-charcoal">{formatCurrency(billAmount)}</td>
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-red-50 text-red-700 border-red-200">
@@ -247,7 +252,7 @@ export function PaymentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface">
-                {['Job Number', 'Vendor', 'Process', 'Type', 'Date', 'Paid (entry)', 'Total Paid', 'Total Bill', 'Balance', 'Status', 'Action'].map((h) => (
+                {['Issue Date', 'Job Number', 'Vendor', 'Process', 'Priority', 'Type', 'Date', 'Paid (entry)', 'Total Paid', 'Total Bill', 'Balance', 'Status', 'Action'].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -258,7 +263,8 @@ export function PaymentsPage() {
                 const job    = jobWorks.find((j) => j.id === payment.jobWorkId);
                 const balance = Math.max(0, payment.totalBill - payment.totalPaid);
                 return (
-                  <tr key={payment.id} className="border-b border-border hover:bg-surface/50">
+                    <tr key={payment.id} data-payment-row="true" tabIndex={activeRowIndex === filteredPayments.indexOf(payment) ? 0 : -1} className={`border-b border-border hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${priorityRowClass(job?.priority ?? 'Normal')} ${activeRowIndex === filteredPayments.indexOf(payment) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
+                    <td className="px-4 py-3">{formatDate(job?.issueDate ?? '')}</td>
                     <td className="px-4 py-3">
                       <button
                           type="button"
@@ -270,6 +276,7 @@ export function PaymentsPage() {
                     </td>
                     <td className="px-4 py-3">{vendor?.name ?? '—'}</td>
                     <td className="px-4 py-3">{payment.process}</td>
+                    <td className="px-4 py-3"><PriorityBadge priority={job?.priority ?? 'Normal'} /></td>
                     <td className="px-4 py-3">{payment.paymentType}</td>
                     <td className="px-4 py-3">{formatDate(payment.date)}</td>
                     <td className="px-4 py-3 font-semibold text-brand">{formatCurrency(payment.paid)}</td>

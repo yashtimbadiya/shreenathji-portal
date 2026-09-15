@@ -17,6 +17,8 @@ import {
 } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
+import { sortByDateDesc } from '../lib/sorting';
+import { PriorityBadge } from '../components/ui/PriorityBadge';
 
 const TIMELINE_STEPS = ['Job Created', 'Material Dispatched', 'Vendor Processing', 'Partial Receipt', 'QC', 'Completed'];
 
@@ -51,10 +53,10 @@ export function JobWorkDetailPage() {
   if (!job) return <div className="text-center py-16 text-muted">Job work not found</div>;
 
   const vendor = vendors.find((v) => v.id === job.vendorId);
-  const jobDispatches = dispatches.filter((d) => d.jobWorkId === job.id);
-  const jobReceipts = receipts.filter((r) => r.jobWorkId === job.id);
-  const jobActivities = activityLogs.filter((a) => a.entityId === job.id);
-  const jobPayments = payments.filter((p) => p.jobWorkId === job.id);
+  const jobDispatches = sortByDateDesc(dispatches.filter((d) => d.jobWorkId === job.id), (dispatch) => dispatch.date);
+  const jobReceipts = sortByDateDesc(receipts.filter((r) => r.jobWorkId === job.id), (receipt) => receipt.date);
+  const jobActivities = sortByDateDesc(activityLogs.filter((a) => a.entityId === job.id), (activity) => activity.timestamp);
+  const jobPayments = sortByDateDesc(payments.filter((p) => p.jobWorkId === job.id), (payment) => payment.date);
 
   const timelineIndex = job.status === 'Completed' ? 5 : job.status === 'Partial' ? 3 : job.status === 'Processing' ? 2 : job.status === 'Sent' ? 1 : 0;
 
@@ -116,6 +118,7 @@ export function JobWorkDetailPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-charcoal">{job.jobNumber}</h1>
+            <PriorityBadge priority={job.priority} />
             <StatusBadge status={job.status} />
           </div>
           <div className="flex flex-wrap gap-4 mt-2 text-sm text-muted">
@@ -187,7 +190,7 @@ export function JobWorkDetailPage() {
       {activeTab === 'Overview' && (
         <Card className="p-6">
           <div className="grid grid-cols-2 gap-4 text-sm">
-            <div><span className="text-muted">Priority:</span> <strong>{job.priority}</strong></div>
+            <div><span className="text-muted">Priority:</span> <PriorityBadge priority={job.priority} /></div>
             <div><span className="text-muted">Reference:</span> <strong>{job.reference ?? '—'}</strong></div>
             <div><span className="text-muted">Created By:</span> <strong>{job.createdBy}</strong></div>
             <div><span className="text-muted">Remarks:</span> <strong>{job.remarks ?? '—'}</strong></div>
@@ -452,15 +455,16 @@ export function JobWorkDetailPage() {
                   </thead>
                   <tbody>
                     {(() => {
-                      let running = 0;
+                      let running = alreadyPaid;
                       return jobPayments.map((p, i) => {
-                        running += p.paid;
-                        const remaining = Math.max(0, jobTotalAmount - running);
+                        const cumulativePaid = running;
+                        const remaining = Math.max(0, jobTotalAmount - cumulativePaid);
+                        running = Math.max(0, running - p.paid);
                         // derive status from cumulative, not stored value
                         const status: 'Paid' | 'Partial' | 'Pending' =
-                          running >= jobTotalAmount && jobTotalAmount > 0
+                          cumulativePaid >= jobTotalAmount && jobTotalAmount > 0
                             ? 'Paid'
-                            : running > 0
+                            : cumulativePaid > 0
                             ? 'Partial'
                             : 'Pending';
                         return (
@@ -469,7 +473,7 @@ export function JobWorkDetailPage() {
                             <td className="px-4 py-3">{p.paymentType}</td>
                             <td className="px-4 py-3">{formatDate(p.date)}</td>
                             <td className="px-4 py-3 font-semibold text-brand">{formatCurrency(p.paid)}</td>
-                            <td className="px-4 py-3 font-semibold text-success">{formatCurrency(running)}</td>
+                            <td className="px-4 py-3 font-semibold text-success">{formatCurrency(cumulativePaid)}</td>
                             <td className="px-4 py-3 font-semibold text-danger">{formatCurrency(remaining)}</td>
                             <td className="px-4 py-3">
                               <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
@@ -786,7 +790,7 @@ export function EditJobWorkPage() {
 
         {/* ── Read-only: Challans ── */}
         {(() => {
-          const jobDispatches = dispatches.filter((d) => d.jobWorkId === job.id);
+          const jobDispatches = sortByDateDesc(dispatches.filter((d) => d.jobWorkId === job.id), (dispatch) => dispatch.date);
           if (jobDispatches.length === 0) return null;
           return (
             <Card className="max-w-2xl">

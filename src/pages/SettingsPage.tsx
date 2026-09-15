@@ -233,7 +233,7 @@ export function SettingsPage() {
           <p className="text-xs text-muted mb-5">
             Point the app to a folder on your computer. Every backup is saved as a new dated
             file — nothing is ever overwritten or deleted, giving you a complete history.
-            Backups run automatically every time you open the app and every time you close it.
+            Backups run automatically when the tab or app is closed, and can also be started manually.
             {!supportsFileSystemAccess && (
               <span className="block mt-1 text-orange-600 font-medium">
                 ⚠ Folder access requires Chrome or Edge 86+. On Firefox/Safari a .xlsx file is
@@ -331,9 +331,8 @@ export function SettingsPage() {
             <div className="rounded-lg bg-surface border border-border px-4 py-3 text-xs text-muted space-y-1.5">
               <p className="font-semibold text-charcoal text-xs">How it works</p>
               <p>📁 Each backup = a new dated file — nothing is ever overwritten or deleted.</p>
-              <p>🚀 Runs automatically when you <strong>open</strong> the app.</p>
-              <p>🔒 Runs automatically when you <strong>close or switch away</strong> from the tab.</p>
-              <p>⚡ Also runs <strong>10 s after any data change</strong> (if folder is set and permission is active).</p>
+              <p>🔒 Runs automatically when you <strong>close or unload</strong> the tab or app.</p>
+              <p>⏸ Does not run when you minimize, switch tabs, or edit data. Browsers may also fire the close event during a reload.</p>
               {!supportsFileSystemAccess && (
                 <p className="text-orange-600 font-medium">⚠ Chrome/Edge: saves to folder. Firefox/Safari: downloads to your Downloads folder.</p>
               )}

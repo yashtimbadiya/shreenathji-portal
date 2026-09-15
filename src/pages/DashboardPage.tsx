@@ -24,6 +24,9 @@ import {
   getJobSentTotal,
 } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass } from '../components/ui/PriorityBadge';
+import { PriorityBadge } from '../components/ui/PriorityBadge';
 
 const STATUS_COLORS: Record<string, string> = {
   Draft: '#94a3b8',
@@ -79,6 +82,8 @@ export function DashboardPage() {
   const categories = useAppStore((s) => s.categories);
   const dispatches = useAppStore((s) => s.dispatches);
   const receipts   = useAppStore((s) => s.receipts);
+  const recentDispatches = useMemo(() => sortByDateDesc(dispatches, (dispatch) => dispatch.date).slice(0, 5), [dispatches]);
+  const recentReceipts = useMemo(() => sortByDateDesc(receipts, (receipt) => receipt.date).slice(0, 5), [receipts]);
 
   // ── Month selector state ──────────────────────────────────────────────────
   const [selectedMonth, setSelectedMonth] = useState(() => monthKey(new Date()));
@@ -230,7 +235,7 @@ export function DashboardPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface">
-                {['Job Number','Vendor','Product','Variant','Sent','Received','Pending','Issue Date','Due Date','Status','Actions'].map((h) => (
+                {['Issue Date','Job Number','Vendor','Product','Variant','Sent','Received','Pending','Due Date','Status','Actions'].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -245,7 +250,8 @@ export function DashboardPage() {
                 const product   = firstItem ? products.find((p) => p.id === firstItem.productId) : null;
                 const variant   = product?.variants.find((v) => v.id === firstItem?.variantId);
                 return (
-                  <tr key={job.id} className="border-b border-border hover:bg-surface/50">
+                  <tr key={job.id} className={`border-b border-border hover:bg-surface/50 ${priorityRowClass(job.priority)}`}>
+                    <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                     <td className="px-4 py-3 font-medium text-brand">{job.jobNumber}</td>
                     <td className="px-4 py-3">{vendor?.name}</td>
                     <td className="px-4 py-3">{product?.name}{job.items.length > 1 ? ` +${job.items.length - 1}` : ''}</td>
@@ -253,7 +259,6 @@ export function DashboardPage() {
                     <td className="px-4 py-3">{formatQty(getJobSentTotal(job),      product?.unit ?? 'Unit')}</td>
                     <td className="px-4 py-3">{formatQty(getJobReceivedTotal(job),  product?.unit ?? 'Unit')}</td>
                     <td className="px-4 py-3 font-medium">{formatQty(getJobPendingTotal(job), product?.unit ?? 'Unit')}</td>
-                    <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                     <td className="px-4 py-3">{formatDate(job.expectedReturnDate)}</td>
                     <td className="px-4 py-3"><StatusBadge status={job.status} /></td>
                     <td className="px-4 py-3">
@@ -503,7 +508,7 @@ export function DashboardPage() {
             {dispatches.length === 0 && (
               <p className="px-4 py-6 text-sm text-muted">No dispatches recorded yet.</p>
             )}
-            {dispatches.slice(0, 5).map((d) => (
+            {recentDispatches.map((d) => (
               <div key={d.id} className="px-4 py-3 flex justify-between text-sm">
                 <div>
                   <p className="font-medium">{d.challanNumber}</p>
@@ -521,12 +526,12 @@ export function DashboardPage() {
             {receipts.length === 0 && (
               <p className="px-4 py-6 text-sm text-muted">No receipts recorded yet.</p>
             )}
-            {receipts.slice(0, 5).map((r) => {
+            {recentReceipts.map((r) => {
               const job = jobWorks.find((j) => j.id === r.jobWorkId);
               return (
                 <div key={r.id} className="px-4 py-3 flex justify-between text-sm">
                   <div>
-                    <p className="font-medium">{job?.jobNumber}</p>
+                    <p className="font-medium">{job?.jobNumber} {job && <PriorityBadge priority={job.priority} />}</p>
                     <p className="text-xs text-muted">{formatDate(r.date)}</p>
                   </div>
                   <p className="text-muted">{r.receivedBy}</p>

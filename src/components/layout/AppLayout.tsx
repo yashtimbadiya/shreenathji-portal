@@ -6,6 +6,7 @@ import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
 import { useAutoBackup } from '../../hooks/useAutoBackup';
 import { useGlobalEscNavigation } from '../../hooks/useGlobalEscNavigation';
+import { useFormPageNavigation } from '../../hooks/useFormPageNavigation';
 import { LEADER_KEY, LEADER_TIMEOUT_MS, SHORTCUTS } from '../../lib/shortcuts';
 
 export function AppLayout() {
@@ -28,6 +29,7 @@ export function AppLayout() {
 
   // ── Global ESC navigation (child → parent → dashboard) ───────────────────
   useGlobalEscNavigation();
+  useFormPageNavigation();
 
   // ── Leader-key shortcut system ────────────────────────────────────────────
   // State tracked outside React renders to avoid stale closure issues.

@@ -9,6 +9,7 @@ import { getCategoryById } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
+import { sortByDateDesc } from '../lib/sorting';
 
 export function InventoryPage() {
   const products = useAppStore((s) => s.products);
@@ -82,11 +83,11 @@ export function InventoryPage() {
           />
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2 rounded-lg border border-border text-sm">
             <option value="">All Categories</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {sortByDateDesc(categories, (category) => category.createdDate).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)} className="px-3 py-2 rounded-lg border border-border text-sm">
             <option value="">All Products</option>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {sortByDateDesc(products, (product) => product.createdAt).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
       </Card>
@@ -219,7 +220,10 @@ export function StockLedgerPage() {
     }
   }
 
-  const transactions = stockTransactions.filter((t) => t.variantId === variantId);
+  const transactions = sortByDateDesc(
+    stockTransactions.filter((t) => t.variantId === variantId),
+    (transaction) => transaction.date,
+  );
 
   return (
     <div>

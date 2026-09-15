@@ -10,6 +10,9 @@ import { formatDate } from '../data/mockData';
 import type { ReferenceItem } from '../types';
 import { useEscapeBack } from '../hooks/useEscapeBack';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -47,6 +50,8 @@ export function ReferencesPage() {
 
   const [deleteTarget,  setDeleteTarget]  = useState<{ id: string; refNumber: string } | null>(null);
   const [blockedTarget, setBlockedTarget] = useState<{ refNumber: string; reasons: string[] } | null>(null);
+  const sortedReferences = useMemo(() => sortByDateDesc(references, (ref) => ref.createdDate), [references]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: sortedReferences.length, rowSelector: '[data-reference-row="true"]' });
 
   const handleDeleteClick = (id: string, refNumber: string) => {
     const reasons = checkConstraints(id);
@@ -77,12 +82,12 @@ export function ReferencesPage() {
               </tr>
             </thead>
             <tbody>
-              {references.map((ref) => {
+              {sortedReferences.map((ref) => {
                 const items       = resolveItems(ref);
                 const isUsed      = usedReferenceNumbers.has(ref.referenceNumber.trim().toLowerCase());
                 const totalPieces = items.reduce((s, i) => s + i.pieces, 0);
                 return (
-                  <tr key={ref.id} className={`border-b border-border hover:bg-surface/50 ${isUsed ? 'opacity-60' : ''}`}>
+                  <tr key={ref.id} data-reference-row="true" tabIndex={activeRowIndex === sortedReferences.indexOf(ref) ? 0 : -1} className={`border-b border-border hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${isUsed ? 'opacity-60' : ''} ${activeRowIndex === sortedReferences.indexOf(ref) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
                     <td className="px-4 py-3">
                       <Link to={`/references/${ref.id}`} className="font-semibold text-brand hover:underline">
                         {ref.referenceNumber}
@@ -766,11 +771,12 @@ export function ViewReferencePage() {
                 </thead>
                 <tbody>
                   {linkedJobs.map((job) => (
-                    <tr key={job.id} className="border-b border-border last:border-0 hover:bg-surface/50">
+                    <tr key={job.id} className={`border-b border-border last:border-0 hover:bg-surface/50 ${priorityRowClass(job.priority)}`}>
                       <td className="px-4 py-3">
                         <Link to={`/job-works/${job.id}`} className="font-medium text-brand hover:underline">
                           {job.jobNumber}
                         </Link>
+                        <span className="ml-2"><PriorityBadge priority={job.priority} /></span>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold

@@ -5,6 +5,7 @@ import { Card, KPICard } from '../components/ui/Card';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatCurrency, formatDate, formatQty } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
 import type { DispatchRecord } from '../types';
 
 const TABS = ['Overview', 'Job Works', 'Material Ledger', 'Payments', 'Documents'];
@@ -80,7 +81,7 @@ export function VendorDetailPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface">
-                  {['Date', 'Job Number', 'Challan No.', 'Product', 'Variant', 'Sent', 'Received', 'Pending', 'Due Date', 'Status'].map((h) => (
+                  {['Issue Date', 'Job Number', 'Challan No.', 'Product', 'Variant', 'Sent', 'Received', 'Pending', 'Due Date', 'Status'].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                   ))}
                 </tr>
@@ -92,10 +93,11 @@ export function VendorDetailPage() {
                   const variant = product?.variants.find((v) => v.id === item?.variantId);
                   const jobChallans = challansByJob[job.id] ?? [];
                   return (
-                    <tr key={job.id} className="border-b border-border">
+                    <tr key={job.id} className={`border-b border-border ${priorityRowClass(job.priority)}`}>
                       <td className="px-4 py-3">{formatDate(job.issueDate)}</td>
                       <td className="px-4 py-3">
                         <Link to={`/job-works/${job.id}`} className="text-brand hover:underline">{job.jobNumber}</Link>
+                        <span className="ml-2"><PriorityBadge priority={job.priority} /></span>
                       </td>
                       {/* Challan No. — may be multiple challans per job */}
                       <td className="px-4 py-3">

@@ -8,31 +8,9 @@ import {
   useState,
 } from 'react';
 import { ChevronDown, Search, X } from 'lucide-react';
+import { focusNextInForm } from '../../lib/formNavigation';
 
-// ── Shared focus-next utility ─────────────────────────────────────────────────
-// Walks the nearest <form> or [data-form] container and moves focus to the
-// next or previous focusable element.
-// Called by Input, Select, Textarea, and SearchableSelect on Enter / Shift+Enter.
-
-export function focusNextInForm(current: HTMLElement, reverse = false) {
-  const root =
-    current.closest<HTMLElement>('form') ??
-    current.closest<HTMLElement>('[data-form]');
-  if (!root) return;
-
-  const selector = [
-    'input:not([disabled]):not([type="hidden"])',
-    'select:not([disabled])',
-    'textarea:not([disabled])',
-    'button[data-trigger]:not([disabled])',   // SearchableSelect triggers
-    'button[type="submit"]:not([disabled])',
-  ].join(', ');
-
-  const focusable = Array.from(root.querySelectorAll<HTMLElement>(selector));
-  const idx = focusable.indexOf(current);
-  const target = reverse ? focusable[idx - 1] : focusable[idx + 1];
-  if (target) target.focus();
-}
+export { focusNextInForm } from '../../lib/formNavigation';
 
 function handleEnterKey(e: KeyboardEvent<HTMLElement>) {
   if (e.key !== 'Enter') return;
@@ -400,7 +378,7 @@ export function SearchableSelect({
 
       {/* ── Dropdown panel ── */}
       {open && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-white shadow-2xl">
+        <div data-form-navigation-popup className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-white shadow-2xl">
           {/* Search row */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
             <Search size={13} className="text-muted shrink-0" />

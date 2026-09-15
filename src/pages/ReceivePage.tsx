@@ -1,12 +1,16 @@
 ﻿﻿import { Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card, PageHeader } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import { formatDate } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { sortByDateDesc } from '../lib/sorting';
+import { priorityRowClass, PriorityBadge } from '../components/ui/PriorityBadge';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 // Tab index map for the Receipt form
 const T = {
@@ -56,14 +60,10 @@ export function ReceivePage() {
 
   // Latest jobs first
   const allJobs = useMemo(() => {
-    return jobWorks
-      .filter((j) => ['Sent', 'Processing', 'Overdue', 'Partial'].includes(j.status))
-      .slice()
-      .sort((a, b) => {
-        const order: Record<string, number> = { Partial: 0, Overdue: 1, Sent: 2, Processing: 3 };
-        const byStatus = (order[a.status] ?? 4) - (order[b.status] ?? 4);
-        return byStatus !== 0 ? byStatus : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
+    return sortByDateDesc(
+      jobWorks.filter((j) => ['Sent', 'Processing', 'Overdue', 'Partial'].includes(j.status)),
+      (job) => job.createdAt,
+    );
   }, [jobWorks]);
 
   const searchResults = useMemo(() => {
@@ -238,13 +238,15 @@ export function ReceivePage() {
                 <button
                   key={j.id}
                   onClick={() => handleSelectJob(j.id)}
-                  className={`w-full text-left px-4 py-3 transition-colors ${
+                  className={`w-full text-left px-4 py-3 transition-colors ${priorityRowClass(j.priority)} ${
                     isHighlighted ? 'bg-brand/10' : 'hover:bg-surface/80'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-brand text-sm">{j.jobNumber}</p>
+                      <p className="font-semibold text-brand text-sm">
+                        {j.jobNumber} <PriorityBadge priority={j.priority} />
+                      </p>
                       <p className="text-xs text-muted mt-0.5">
                         <span className="font-medium text-charcoal">{v?.name ?? '—'}</span>
                         {d && <span> · {d.challanNumber}</span>}
@@ -467,6 +469,7 @@ export function ReceiptHistoryPage() {
     () => [...receipts].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [receipts],
   );
+  const activeRowIndex = useListPointerNavigation({ itemCount: sorted.length, rowSelector: '[data-receipt-row="true"]' });
 
   return (
     <div>
@@ -476,7 +479,7 @@ export function ReceiptHistoryPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface">
-                {['Date', 'Job Work', 'Vendor', 'Received By', 'Subproduct', 'Vendor Challan', 'Quantity'].map((h) => (
+                {['Receipt Number', 'Date', 'Job Work', 'Vendor', 'Received By', 'Subproduct', 'Vendor Challan', 'Quantity'].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -484,7 +487,7 @@ export function ReceiptHistoryPage() {
             <tbody>
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-muted">
                     No receipts recorded yet.
                   </td>
                 </tr>
@@ -505,7 +508,12 @@ export function ReceiptHistoryPage() {
                 const totalReceived = r.items.reduce((sum, ri) => sum + ri.received, 0);
 
                 return (
-                  <tr key={r.id} className="border-b border-border hover:bg-surface/50">
+                  <tr key={r.id} data-receipt-row="true" tabIndex={activeRowIndex === sorted.indexOf(r) ? 0 : -1} className={`border-b border-border hover:bg-surface/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${priorityRowClass(job?.priority ?? 'Normal')} ${activeRowIndex === sorted.indexOf(r) ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
+                    <td className="px-4 py-3">
+                      <Link to={`/receive/history/${r.id}`} className="font-semibold text-brand hover:underline">
+                        {r.receiptNumber ?? r.id}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3">{formatDate(r.date)}</td>
                     <td className="px-4 py-3 font-semibold text-brand">{job?.jobNumber ?? '—'}</td>
                     <td className="px-4 py-3">{vendor?.name ?? '—'}</td>
@@ -525,6 +533,73 @@ export function ReceiptHistoryPage() {
                     <td className="px-4 py-3 font-semibold text-charcoal">
                       {totalReceived.toLocaleString('en-IN')} Pic
                     </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+export function ReceiptDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const receipts = useAppStore((s) => s.receipts);
+  const jobWorks = useAppStore((s) => s.jobWorks);
+  const vendors = useAppStore((s) => s.vendors);
+  const products = useAppStore((s) => s.products);
+  const receipt = receipts.find((item) => item.id === id);
+
+  if (!receipt) return <div className="text-center py-16 text-muted">Receipt not found</div>;
+
+  const job = jobWorks.find((item) => item.id === receipt.jobWorkId);
+  const vendor = vendors.find((item) => item.id === job?.vendorId);
+
+  return (
+    <div>
+      <div className="mb-4">
+        <Link to="/receive/history" className="text-sm text-brand hover:underline">Back to Receipt History</Link>
+      </div>
+      <PageHeader title={receipt.receiptNumber ?? receipt.id} subtitle="Receipt details" />
+
+      <Card className="p-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
+          <div><p className="text-xs uppercase font-semibold text-muted">Receipt Date</p><p className="font-medium mt-1">{formatDate(receipt.date)}</p></div>
+          <div><p className="text-xs uppercase font-semibold text-muted">Job Work</p><p className="font-medium mt-1"><Link to={job ? `/job-works/${job.id}` : '/job-works'} className="text-brand hover:underline">{job?.jobNumber ?? '—'}</Link></p></div>
+          <div><p className="text-xs uppercase font-semibold text-muted">Vendor</p><p className="font-medium mt-1">{vendor?.name ?? '—'}</p></div>
+          <div><p className="text-xs uppercase font-semibold text-muted">Received By</p><p className="font-medium mt-1">{receipt.receivedBy}</p></div>
+          <div><p className="text-xs uppercase font-semibold text-muted">Vendor Challan</p><p className="font-medium mt-1">{receipt.vendorChallanNumber || '—'}</p></div>
+          <div><p className="text-xs uppercase font-semibold text-muted">Created By</p><p className="font-medium mt-1">{receipt.createdBy}</p></div>
+        </div>
+        {receipt.remarks && <p className="mt-5 pt-4 border-t border-border text-sm text-muted"><strong className="text-charcoal">Remarks:</strong> {receipt.remarks}</p>}
+      </Card>
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-surface">
+                {['Product', 'Variant', 'Received', 'Rejected', 'Loss'].map((header) => (
+                  <th key={header} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {receipt.items.map((item) => {
+                const jobItem = job?.items.find((candidate) =>
+                  (item.jobWorkItemId && candidate.id === item.jobWorkItemId) || candidate.variantId === item.variantId,
+                );
+                const product = products.find((candidate) => candidate.id === jobItem?.productId);
+                const variant = product?.variants.find((candidate) => candidate.id === item.variantId);
+                return (
+                  <tr key={item.jobWorkItemId ?? item.variantId} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-medium">{product?.name ?? '—'}</td>
+                    <td className="px-4 py-3">{variant?.name ?? '—'}</td>
+                    <td className="px-4 py-3 font-semibold text-green-700">{item.received.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3">{item.rejected.toLocaleString('en-IN')}</td>
+                    <td className="px-4 py-3">{item.loss.toLocaleString('en-IN')}</td>
                   </tr>
                 );
               })}

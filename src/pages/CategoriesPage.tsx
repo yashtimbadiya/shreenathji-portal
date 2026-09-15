@@ -11,6 +11,8 @@ import { BlockedDeleteDialog, ConfirmDialog } from '../components/ui/Modal';
 import { formatDate } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import type { Category } from '../types';
+import { sortByDateDesc } from '../lib/sorting';
+import { useListPointerNavigation } from '../hooks/useListPointerNavigation';
 
 // ─── Inline-editable row ──────────────────────────────────────────────────────
 interface CategoryRowProps {
@@ -18,15 +20,16 @@ interface CategoryRowProps {
   onDelete: () => void;
   /** Pre-computed blocking reasons — if non-empty, delete is blocked */
   deleteBlockReasons: string[];
+  isActive: boolean;
 }
 
-function CategoryRow({ category, onDelete, deleteBlockReasons }: CategoryRowProps) {
+function CategoryRow({ category, onDelete, deleteBlockReasons, isActive }: CategoryRowProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blockedDelete, setBlockedDelete] = useState(false);
 
   return (
     <>
-      <tr className="border-b border-border hover:bg-surface/50 group">
+      <tr data-category-row="true" tabIndex={isActive ? 0 : -1} className={`border-b border-border hover:bg-surface/50 group focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand/50 ${isActive ? 'ring-2 ring-inset ring-brand/50' : ''}`}>
         <td className="px-4 py-3 font-medium">{category.name}</td>
         <td className="px-4 py-3 text-muted">{category.productCount}</td>
         <td className="px-4 py-3"><ActiveBadge active={category.status === 'Active'} /></td>
@@ -83,6 +86,8 @@ export function CategoriesPage() {
   const deleteCategory = useAppStore((s) => s.deleteCategory);
   const checkConstraints = useAppStore((s) => s.checkCategoryDeleteConstraints);
   const navigate       = useNavigate();
+  const sortedCategories = useMemo(() => sortByDateDesc(categories, (category) => category.createdDate), [categories]);
+  const activeRowIndex = useListPointerNavigation({ itemCount: sortedCategories.length, rowSelector: '[data-category-row="true"]' });
 
   // N → navigate to Add Product page
   useNewItemShortcut(() => navigate('/categories/new'));
@@ -118,10 +123,11 @@ export function CategoriesPage() {
                   </td>
                 </tr>
               )}
-              {categories.map((cat) => (
-                <CategoryRow
+              {sortedCategories.map((cat) => (
+                  <CategoryRow
                   key={cat.id}
                   category={cat}
+                    isActive={activeRowIndex === sortedCategories.indexOf(cat)}
                   onDelete={() => deleteCategory(cat.id)}
                   deleteBlockReasons={checkConstraints(cat.id)}
                 />
@@ -162,7 +168,7 @@ function SharedVariantPanel({ selectedSvIds, onChange, firstCheckboxRef, saveBtn
   const listRef = useRef<HTMLDivElement>(null);
 
   const activeSharedVariants = useMemo(
-    () => sharedVariants.filter((sv) => sv.status === 'Active'),
+    () => sortByDateDesc(sharedVariants.filter((sv) => sv.status === 'Active'), (sv) => sv.createdDate),
     [sharedVariants],
   );
 

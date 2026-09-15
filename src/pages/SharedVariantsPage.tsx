@@ -15,6 +15,7 @@ import { ActiveBadge } from '../components/ui/StatusBadge';
 import { useAppStore } from '../store/useAppStore';
 import type { SharedVariant } from '../types';
 import { useNewItemShortcut } from '../hooks/useNewItemShortcut';
+import { sortByDateDesc } from '../lib/sorting';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline form (used for both Add and Edit rows)
@@ -118,9 +119,12 @@ export function SharedVariantsPage() {
   useNewItemShortcut(() => { setShowAddForm(true); setEditingId(null); });
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return sharedVariants;
+    if (!search.trim()) return sortByDateDesc(sharedVariants, (sv) => sv.createdDate);
     const q = search.toLowerCase();
-    return sharedVariants.filter((sv) => sv.name.toLowerCase().includes(q));
+    return sortByDateDesc(
+      sharedVariants.filter((sv) => sv.name.toLowerCase().includes(q)),
+      (sv) => sv.createdDate,
+    );
   }, [sharedVariants, search]);
 
   // Count how many subproducts use each shared variant (matched via sharedVariantId back-reference)
