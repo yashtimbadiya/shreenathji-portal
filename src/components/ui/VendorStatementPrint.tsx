@@ -63,8 +63,10 @@ export function printVendorStatement(data: VendorStatementPrintData): void {
   <style>
     @page { size: A4 portrait; margin: 12mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.5pt; color: #111827; background: #fff;
+    html, body { width: 100%; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.5pt; color: #111827; background: #fff;
            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    table.grid { max-width: 100%; table-layout: fixed; }
+    table.grid td, table.grid th { overflow: hidden; text-overflow: ellipsis; word-break: break-word; }
     .header { display: flex; justify-content: space-between; align-items: flex-start;
               border-bottom: 2.5px solid #2563eb; padding-bottom: 8px; margin-bottom: 12px; }
     .company-name { font-size: 15pt; font-weight: 800; color: #2563eb; }

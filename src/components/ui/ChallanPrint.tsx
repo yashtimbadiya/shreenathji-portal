@@ -424,16 +424,19 @@ export function printChallan(
   <style>
     /* ── Page geometry ───────────────────────────────────────────────
        A5 = 148 × 210 mm (portrait) / 210 × 148 mm (landscape).
-       We declare the exact size AND a physical .page box sized to the
-       printable area (page minus margins) so the whole challan is forced
-       onto ONE sheet and can never spill to a second page. */
+       Let @page own the paper size AND the margin. The content box then
+       fills 100% of the *printable* area the browser hands us — we do NOT
+       hard-code a mm width, because printer drivers add their own
+       unprintable margin and a fixed width would overflow (clipping the
+       right edge and leaving a gap on the left). */
     ${orientation === 'vertical'
-      ? '@page { size: 148mm 210mm; margin: 6mm; }'
-      : '@page { size: 210mm 148mm; margin: 6mm; }'}
+      ? '@page { size: A5 portrait; margin: 6mm; }'
+      : '@page { size: A5 landscape; margin: 6mm; }'}
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     html, body {
+      width: 100%;
       font-family: 'Segoe UI', Arial, sans-serif;
       color: #111827;
       background: #fff;
@@ -441,29 +444,40 @@ export function printChallan(
       print-color-adjust: exact;
     }
 
-    /* The single printable page. Height is the A5 side minus the 2×6mm
-       margins so it fits exactly. overflow:hidden guarantees no page 2. */
+    /* Fill the printable width; never exceed it. Flex column so the
+       signature block can sit at the bottom via .spacer. */
     .page {
-      width:  ${orientation === 'vertical' ? '136mm' : '198mm'};
-      height: ${orientation === 'vertical' ? '198mm' : '136mm'};
-      margin: 0 auto;
+      width: 100%;
+      max-width: 100%;
       display: flex;
       flex-direction: column;
-      overflow: hidden;
       font-size: ${orientation === 'vertical' ? '9.2pt' : '9pt'};
-      page-break-inside: avoid;
-      page-break-after: avoid;
     }
-    /* On screen, give the preview a light border so it reads as a page */
+    /* On screen, mimic an A5 sheet so the preview matches the print. */
     @media screen {
       body { background: #f3f4f6; padding: 16px; }
-      .page { box-shadow: 0 1px 8px rgba(0,0,0,.15); background: #fff; padding: 0; }
+      .page {
+        width:  ${orientation === 'vertical' ? '148mm' : '210mm'};
+        min-height: ${orientation === 'vertical' ? '210mm' : '148mm'};
+        margin: 0 auto;
+        padding: 6mm;
+        background: #fff;
+        box-shadow: 0 1px 8px rgba(0,0,0,.15);
+      }
+    }
+    /* On paper the @page margin handles spacing; screen height must not
+       clamp print output, so let it grow naturally when printing. */
+    @media print {
+      .page { min-height: auto; }
     }
     /* Push the signature block to the bottom of the page */
     .spacer { flex: 1 1 auto; min-height: 8px; }
-    /* Never break a table row or the signatures across pages */
-    table.items, .sigs, .header, .info-grid { page-break-inside: avoid; }
+    /* Keep logical blocks together; allow long item tables to flow if needed */
+    .sigs, .header, .info-grid { page-break-inside: avoid; }
     tr { page-break-inside: avoid; }
+    /* Wide item tables must shrink to fit, not overflow the page width */
+    table { width: 100%; max-width: 100%; table-layout: fixed; }
+    td, th { overflow: hidden; text-overflow: ellipsis; word-break: break-word; }
 
     .header {
       display: flex;
