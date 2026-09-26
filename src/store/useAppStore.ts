@@ -89,6 +89,7 @@ interface AppState {
   jobNumberPoolYear: number;
   challanCounter: number;
   receiptCounter: number;
+  paymentReceiptCounter: number;
 
   login: (email: string, password: string) => boolean;
   logout: () => void;
@@ -115,9 +116,24 @@ interface AppState {
   settings: Settings;
   updateSettings: (data: Partial<Settings>) => void;
 
-  createJobWork: (data: Omit<JobWork, 'id' | 'jobNumber' | 'createdAt' | 'status'> & { status?: JobWork['status'] }) => string;
+  /**
+   * Create a job work. If `customSerial` is provided it becomes the job number
+   * (after a uniqueness check); otherwise the next auto number is used.
+   * Returns the new job id, or null if the custom serial is already taken.
+   */
+  createJobWork: (
+    data: Omit<JobWork, 'id' | 'jobNumber' | 'createdAt' | 'status'> & { status?: JobWork['status'] },
+    customSerial?: number,
+  ) => string | null;
   updateJobWork: (id: string, data: Partial<JobWork>) => void;
+  /**
+   * Change a job's number to `serial` (after a uniqueness check).
+   * Returns true on success, false if the serial is already used by another job.
+   */
+  changeJobNumber: (id: string, serial: number) => boolean;
   deleteJobWork: (id: string) => void;
+  /** True if a job-number serial is free to use (optionally excluding one job id). */
+  isJobSerialAvailable: (serial: number, excludeJobId?: string) => boolean;
 
   createDispatch: (data: Omit<DispatchRecord, 'id' | 'challanNumber'>) => string;
   updateDispatch: (id: string, data: Partial<Pick<DispatchRecord, 'date' | 'vehicleNumber' | 'driver' | 'transport' | 'remarks'>>) => void;
@@ -126,6 +142,20 @@ interface AppState {
   recordPayment: (paymentId: string, amount: number) => void;
   addPayment: (payment: Omit<Payment, 'id'>) => void;
   deletePayment: (id: string) => void;
+  /**
+   * Record a vendor-level (monthly) payment. Amount owed is computed from
+   * received quantity × rate, so this just books the money paid and returns
+   * the created Payment (with a receipt number) for printing.
+   */
+  payVendor: (data: {
+    vendorId: string;
+    amount: number;
+    date: string;
+    method?: Payment['method'];
+    reference?: string;
+    period?: string;
+    remarks?: string;
+  }) => Payment | null;
 
   addReference: (ref: Omit<ReferenceRecord, 'id'>) => void;
   updateReference: (id: string, data: Partial<ReferenceRecord>) => void;
@@ -193,6 +223,7 @@ const DEFAULT_SETTINGS: Settings = {
   challanPrefix: 'CH-YYYY-#####',
   receiptPrefix: 'RC-YYYY-#####',
   invoicePrefix: 'INV-YYYY-#####',
+  paymentReceiptPrefix: 'PR-YYYY-#####',
 };
 
 function computeJobStatus(job: JobWork): JobWork['status'] {
@@ -242,6 +273,7 @@ const BOOTSTRAP_STATE = {
   jobNumberPoolYear: new Date().getFullYear(),
   challanCounter: 0,
   receiptCounter: 0,
+  paymentReceiptCounter: 0,
 };
 
 export const useAppStore = create<AppState>()(
@@ -267,6 +299,7 @@ export const useAppStore = create<AppState>()(
       jobNumberPoolYear: BOOTSTRAP_STATE.jobNumberPoolYear,
       challanCounter: BOOTSTRAP_STATE.challanCounter,
       receiptCounter: BOOTSTRAP_STATE.receiptCounter,
+      paymentReceiptCounter: BOOTSTRAP_STATE.paymentReceiptCounter,
 
       resetStore: () => {
         localStorage.removeItem('shreenathji-portal');
@@ -291,6 +324,7 @@ export const useAppStore = create<AppState>()(
           jobNumberPoolYear: BOOTSTRAP_STATE.jobNumberPoolYear,
           challanCounter: BOOTSTRAP_STATE.challanCounter,
           receiptCounter: BOOTSTRAP_STATE.receiptCounter,
+          paymentReceiptCounter: BOOTSTRAP_STATE.paymentReceiptCounter,
           settings: DEFAULT_SETTINGS,
         });
       },
@@ -733,6 +767,10 @@ export const useAppStore = create<AppState>()(
             const num = getDocumentSerial(r.receiptNumber ?? '', thisSettings.receiptPrefix) ?? 0;
             return num > max ? num : max;
           }, 0);
+          const maxPaymentReceiptCounter = loadedPayments.reduce((max, p) => {
+            const num = getDocumentSerial(p.receiptNumber ?? '', thisSettings.paymentReceiptPrefix) ?? 0;
+            return num > max ? num : max;
+          }, 0);
 
           set({
             categories: loadedCategories,
@@ -751,6 +789,7 @@ export const useAppStore = create<AppState>()(
             jobNumberPoolYear: currentYear,
             challanCounter: maxChallanCounter,
             receiptCounter: maxReceiptCounter,
+            paymentReceiptCounter: Math.max(get().paymentReceiptCounter, maxPaymentReceiptCounter),
             connectionStatus: 'Local Server Connected',
           });
 
@@ -782,10 +821,30 @@ export const useAppStore = create<AppState>()(
         get().addToast('Settings updated successfully');
       },
 
-      createJobWork: (data) => {
+      isJobSerialAvailable: (serial, excludeJobId) => {
+        if (!Number.isFinite(serial) || serial <= 0) return false;
+        const prefix = get().settings.jobWorkPrefix;
+        return !get().jobWorks.some(
+          (j) => j.id !== excludeJobId && getDocumentSerial(j.jobNumber, prefix) === serial,
+        );
+      },
+
+      createJobWork: (data, customSerial) => {
         const { availableJobNumbers, jobCounter } = get();
         const reusableNumber = [...availableJobNumbers].sort((a, b) => a - b)[0];
-        const nextNumber = reusableNumber ?? jobCounter + 1;
+
+        // Resolve the serial to use: custom (validated) or the next auto number.
+        let nextNumber: number;
+        if (customSerial != null) {
+          if (!get().isJobSerialAvailable(customSerial)) {
+            get().addToast(`Job number ${formatDocumentNumber(get().settings.jobWorkPrefix, customSerial)} already exists`, 'error');
+            return null;
+          }
+          nextNumber = customSerial;
+        } else {
+          nextNumber = reusableNumber ?? jobCounter + 1;
+        }
+
         const jobNumber = formatDocumentNumber(get().settings.jobWorkPrefix, nextNumber);
         const job: JobWork = {
           ...data,
@@ -794,13 +853,14 @@ export const useAppStore = create<AppState>()(
           status: data.status ?? 'Draft',
           createdAt: new Date().toISOString(),
         };
+
         set((s) => ({
           jobWorks: [job, ...s.jobWorks],
-          jobCounter: reusableNumber == null ? nextNumber : s.jobCounter,
+          // Advance the high-water counter if we consumed a fresh (non-reused) number
+          jobCounter: nextNumber > s.jobCounter ? nextNumber : s.jobCounter,
           jobNumberPoolYear: new Date().getFullYear(),
-          availableJobNumbers: reusableNumber == null
-            ? s.availableJobNumbers
-            : s.availableJobNumbers.filter((number) => number !== reusableNumber),
+          // Reclaim the serial from the freed-numbers pool if it was there
+          availableJobNumbers: s.availableJobNumbers.filter((number) => number !== nextNumber),
         }));
         // persist to IndexedDB
         void saveJobWork(job);
@@ -811,16 +871,59 @@ export const useAppStore = create<AppState>()(
       },
 
       updateJobWork: (id, data) => {
+        // If a jobNumber string is passed directly, route it through the
+        // validated changeJobNumber path instead of blindly overwriting.
+        const { jobNumber: incomingJobNumber, ...rest } = data;
+        if (incomingJobNumber !== undefined) {
+          const serial = getDocumentSerial(incomingJobNumber, get().settings.jobWorkPrefix);
+          if (serial != null) get().changeJobNumber(id, serial);
+        }
         set((s) => ({
           jobWorks: s.jobWorks.map((j) => {
             if (j.id !== id) return j;
-            const updated = { ...j, ...data };
+            const updated = { ...j, ...rest };
             return { ...updated, status: computeJobStatus(updated) };
           }),
         }));
         const updated = get().jobWorks.find((j) => j.id === id);
         if (updated) void saveJobWork(updated);
         scheduleBackup();
+      },
+
+      changeJobNumber: (id, serial) => {
+        const job = get().jobWorks.find((j) => j.id === id);
+        if (!job) return false;
+        const prefix = get().settings.jobWorkPrefix;
+        const oldSerial = getDocumentSerial(job.jobNumber, prefix);
+
+        // No-op if unchanged
+        if (oldSerial === serial) return true;
+
+        if (!get().isJobSerialAvailable(serial, id)) {
+          get().addToast(`Job number ${formatDocumentNumber(prefix, serial)} already exists`, 'error');
+          return false;
+        }
+
+        const newJobNumber = formatDocumentNumber(prefix, serial);
+        set((s) => ({
+          jobWorks: s.jobWorks.map((j) => (j.id === id ? { ...j, jobNumber: newJobNumber } : j)),
+          jobCounter: serial > s.jobCounter ? serial : s.jobCounter,
+          jobNumberPoolYear: new Date().getFullYear(),
+          availableJobNumbers: (() => {
+            // Claim the new serial; release the old one back into the pool
+            let pool = s.availableJobNumbers.filter((n) => n !== serial);
+            if (oldSerial != null && oldSerial > 0 && !pool.includes(oldSerial)) {
+              pool = [...pool, oldSerial];
+            }
+            return pool;
+          })(),
+        }));
+        const updated = get().jobWorks.find((j) => j.id === id);
+        if (updated) void saveJobWork(updated);
+        get().addActivity('JobWork', id, `Job number changed to ${newJobNumber}`);
+        get().addToast(`Job number updated to ${newJobNumber}`);
+        scheduleBackup();
+        return true;
       },
 
       deleteJobWork: (id) => {
@@ -971,6 +1074,57 @@ export const useAppStore = create<AppState>()(
         void savePayment(p);
         get().addToast('Payment saved');
         scheduleBackup();
+      },
+
+      payVendor: ({ vendorId, amount, date, method, reference, period, remarks }) => {
+        const vendor = get().vendors.find((v) => v.id === vendorId);
+        if (!vendor) {
+          get().addToast('Vendor not found', 'error');
+          return null;
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+          get().addToast('Enter a valid payment amount', 'error');
+          return null;
+        }
+
+        const counter = get().paymentReceiptCounter + 1;
+        const receiptNumber = formatDocumentNumber(get().settings.paymentReceiptPrefix, counter);
+
+        // A vendor payment is not tied to a single job. We keep the legacy
+        // required fields populated with neutral values so old readers/backups
+        // stay happy, and store the real money in `paid`.
+        const payment: Payment = {
+          id: generateId('pay'),
+          vendorId,
+          jobWorkId: undefined,
+          process: 'Monthly Settlement',
+          quantity: 0,
+          rate: 0,
+          amount,          // amount settled in this receipt (money paid)
+          paid: amount,    // actual money paid
+          status: 'Paid',  // this receipt is fully paid; vendor balance is derived elsewhere
+          paymentType: 'Balance',
+          date,
+          remarks,
+          receiptNumber,
+          method,
+          reference,
+          period,
+        };
+
+        set((s) => ({
+          payments: [payment, ...s.payments],
+          paymentReceiptCounter: counter,
+        }));
+        void savePayment(payment);
+        get().addActivity(
+          'Vendor',
+          vendorId,
+          `Paid ${vendor.name} ₹${amount.toLocaleString('en-IN')} (${receiptNumber})`,
+        );
+        get().addToast(`Payment ${receiptNumber} recorded for ${vendor.name}`);
+        scheduleBackup();
+        return payment;
       },
 
       deletePayment: (id) => {
@@ -1407,6 +1561,7 @@ export const useAppStore = create<AppState>()(
         users: s.users,
         settings: s.settings,
         availableJobNumbers: s.availableJobNumbers,
+        paymentReceiptCounter: s.paymentReceiptCounter,
         // NOTE: all other data is persisted in IndexedDB and loaded via loadLocalData.
         // We keep only auth + settings in localStorage as a fast bootstrap.
       }),

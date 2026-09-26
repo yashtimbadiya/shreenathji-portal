@@ -17,13 +17,21 @@ import { pageEscHandlers } from './useEscapeBack';
  *   /dashboard                   →  (no-op, already home)
  */
 
-/** Maps a pathname to the ESC destination. Returns null to no-op. */
-function resolveEscTarget(pathname: string): string | null {
+/** Maps a pathname (+ query) to the ESC destination. Returns null to no-op. */
+function resolveEscTarget(pathname: string, search = ''): string | null {
+  // ── Products → Subproducts drill-down ────────────────────────────────────
+  // The subproducts list opened for a specific product carries ?category=<id>.
+  // In that case ESC should pop back to the Products (categories) screen the
+  // user came from — not jump all the way to the dashboard.
+  if (pathname === '/products') {
+    const params = new URLSearchParams(search);
+    return params.get('category') ? '/categories' : '/dashboard';
+  }
+
   // ── Top-level "parent" pages → go to dashboard ───────────────────────────
   const parentPages = [
     '/job-works',
     '/categories',
-    '/products',
     '/shared-variants',
     '/references',
     '/vendors',
@@ -51,14 +59,24 @@ function resolveEscTarget(pathname: string): string | null {
   if (/^\/products\/[^/]+$/.test(pathname)) return '/products'; // detail → list
 
   // Vendors
+  if (/^\/vendors\/[^/]+\/statement$/.test(pathname)) return pathname.replace(/\/statement$/, ''); // statement → vendor detail
   if (/^\/vendors\/[^/]+$/.test(pathname)) return '/vendors';
 
   // Challans
+  if (/^\/challans\/[^/]+\/edit$/.test(pathname)) return pathname.replace(/\/edit$/, ''); // edit → challan detail
   if (/^\/challans\/[^/]+$/.test(pathname)) return '/challans';
+
+  // Receive / receipts — receipt detail pops back to the history list
+  if (/^\/receive\/history\/[^/]+$/.test(pathname)) return '/receive/history';
 
   // References
   if (pathname === '/references/new') return '/references';
-  if (/^\/references\/[^/]+\/edit$/.test(pathname)) return '/references';
+  if (/^\/references\/[^/]+\/edit$/.test(pathname)) return '/references';        // edit → list
+  if (/^\/references\/[^/]+$/.test(pathname)) return '/references';              // view → list
+
+  // Inventory
+  if (pathname === '/inventory/new') return '/inventory';
+  if (/^\/inventory\/ledger\/[^/]+$/.test(pathname)) return '/inventory';        // stock ledger → inventory
 
   // Dashboard — already home, no-op
   if (pathname === '/dashboard') return null;
@@ -95,7 +113,7 @@ export function useGlobalEscNavigation() {
       const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase();
       if (tag === 'select') return;
 
-      const target = resolveEscTarget(location.pathname);
+      const target = resolveEscTarget(location.pathname, location.search);
       if (!target) return;
 
       e.preventDefault();
@@ -104,5 +122,5 @@ export function useGlobalEscNavigation() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [navigate, location.pathname]);
+  }, [navigate, location.pathname, location.search]);
 }

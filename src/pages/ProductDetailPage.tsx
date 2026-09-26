@@ -9,6 +9,8 @@ import { Input } from '../components/ui/Input';
 import { Modal, ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { getCategoryById } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
+import { useEscapeBack } from '../hooks/useEscapeBack';
+import { useCallback } from 'react';
 import type { ProductVariant } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,6 +235,12 @@ export function ProductDetailPage() {
 
   const category = product ? categories.find((c) => c.id === product.categoryId) ?? getCategoryById(product.categoryId) : null;
 
+  // ESC pops back to the subproducts list for this product's category
+  // (the screen the user drilled in from), falling back to all subproducts.
+  const backTarget = product?.categoryId ? `/products?category=${product.categoryId}` : '/products';
+  const goBack = useCallback(() => navigate(backTarget), [navigate, backTarget]);
+  useEscapeBack(goBack);
+
   const existingVariantIds = useMemo(
     () => new Set(product?.variants.map((v) => v.id) ?? []),
     [product?.variants],
@@ -294,7 +302,7 @@ export function ProductDetailPage() {
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-center gap-3">
-          <BackButton to="/products" />
+          <BackButton to={backTarget} />
         </div>
 
         <div className="flex-1 min-w-0">

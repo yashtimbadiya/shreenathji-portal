@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useNavigate } from 'react-router-dom';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { ToastContainer } from '../ui/Toast';
 import { Navbar } from './Navbar';
@@ -7,12 +7,11 @@ import { Sidebar } from './Sidebar';
 import { useAutoBackup } from '../../hooks/useAutoBackup';
 import { useGlobalEscNavigation } from '../../hooks/useGlobalEscNavigation';
 import { useFormPageNavigation } from '../../hooks/useFormPageNavigation';
-import { LEADER_KEY, LEADER_TIMEOUT_MS, SHORTCUTS } from '../../lib/shortcuts';
+import { SHORTCUTS } from '../../lib/shortcuts';
 
 export function AppLayout() {
   const currentUser = useAppStore((s) => s.currentUser);
   const loadLocalData = useAppStore((s) => s.loadLocalData);
-  const addToast = useAppStore((s) => s.addToast);
   const navigate = useNavigate();
 
   // Whether the shortcuts help overlay is open — passed down to Navbar
@@ -31,17 +30,8 @@ export function AppLayout() {
   useGlobalEscNavigation();
   useFormPageNavigation();
 
-  // ── Leader-key shortcut system ────────────────────────────────────────────
-  // State tracked outside React renders to avoid stale closure issues.
-  const armedRef  = useRef(false);  // is the leader sequence active?
-  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /** Cancel an armed sequence silently */
-  const disarm = useCallback(() => {
-    armedRef.current = false;
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-  }, []);
-
+  // ── Direct single-key shortcut system ─────────────────────────────────────
+  // Press a single letter to jump to a section — no leader key, no Ctrl combos.
   useEffect(() => {
     const isInputFocused = () => {
       const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase();
@@ -49,66 +39,41 @@ export function AppLayout() {
       return tag === 'input' || tag === 'textarea' || tag === 'select' || editable;
     };
 
-    const handler = (e: KeyboardEvent) => {
-      // Never intercept when typing in a form field
-      if (isInputFocused()) return;
+    // Don't hijack keys while a modal, dialog, or dropdown is open.
+    const hasOverlay = () =>
+      document.querySelector('[role="dialog"]') !== null ||
+      document.querySelector('[data-radix-popper-content-wrapper]') !== null ||
+      document.querySelector('[data-form-navigation-popup]') !== null;
 
-      // ── ? key → toggle shortcut overlay ─────────────────────────────────
-      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const handler = (e: KeyboardEvent) => {
+      // Ignore any modifier combo so we never clash with browser/OS shortcuts.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Never intercept while typing in a field or when an overlay is open.
+      if (isInputFocused() || hasOverlay()) return;
+
+      // ── ? → toggle the shortcut help overlay ────────────────────────────
+      if (e.key === '?') {
         e.preventDefault();
-        disarm();
         setShortcutsOpen((o) => !o);
         return;
       }
 
-      // ── Escape → disarm any active leader sequence ───────────────────────
-      if (e.key === 'Escape') {
-        if (armedRef.current) { e.preventDefault(); disarm(); }
-        return;
-      }
-
-      // ── Ctrl+Shift+N → Create Job Work (legacy shortcut, kept) ──────────
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        disarm();
-        navigate('/job-works/create');
-        return;
-      }
-
-      // Ignore any remaining Ctrl/Meta/Alt combos
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-
       const key = e.key.toLowerCase();
 
-      // ── Step 1: arm leader key ───────────────────────────────────────────
-      if (!armedRef.current) {
-        if (key === LEADER_KEY) {
-          e.preventDefault();
-          armedRef.current = true;
-          // Show a subtle "Go to…" indicator via toast (1.5 s)
-          addToast('Go to…  (D · J · N · R · C · P · V · S · ?)', 'info');
-          timerRef.current = setTimeout(() => {
-            armedRef.current = false;
-            timerRef.current = null;
-          }, LEADER_TIMEOUT_MS);
-        }
-        return;
-      }
-
-      // ── Step 2: leader is armed — resolve second key ─────────────────────
-      e.preventDefault();
-      disarm();
+      // 'n' is reserved for the contextual "New" action on each page
+      // (handled by useNewItemShortcut), so the global navigator ignores it.
+      if (key === 'n') return;
 
       const match = SHORTCUTS.find((s) => s.key === key);
       if (match) {
+        e.preventDefault();
         navigate(match.path);
       }
-      // Unknown second key → silently cancel (toast already dismissed by disarm)
     };
 
     window.addEventListener('keydown', handler);
-    return () => { window.removeEventListener('keydown', handler); disarm(); };
-  }, [navigate, addToast, disarm]);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate]);
 
   if (!currentUser) return <Navigate to="/login" replace />;
 

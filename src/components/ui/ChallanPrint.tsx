@@ -422,16 +422,49 @@ export function printChallan(
   <meta charset="UTF-8"/>
   <title>Challan ${esc(challanNumber)}</title>
   <style>
-    @page { size: A5 ${orientation === 'vertical' ? 'portrait' : 'landscape'}; margin: 8mm; }
+    /* ── Page geometry ───────────────────────────────────────────────
+       A5 = 148 × 210 mm (portrait) / 210 × 148 mm (landscape).
+       We declare the exact size AND a physical .page box sized to the
+       printable area (page minus margins) so the whole challan is forced
+       onto ONE sheet and can never spill to a second page. */
+    ${orientation === 'vertical'
+      ? '@page { size: 148mm 210mm; margin: 6mm; }'
+      : '@page { size: 210mm 148mm; margin: 6mm; }'}
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
+
+    html, body {
       font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 10pt;
       color: #111827;
       background: #fff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
+
+    /* The single printable page. Height is the A5 side minus the 2×6mm
+       margins so it fits exactly. overflow:hidden guarantees no page 2. */
+    .page {
+      width:  ${orientation === 'vertical' ? '136mm' : '198mm'};
+      height: ${orientation === 'vertical' ? '198mm' : '136mm'};
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: ${orientation === 'vertical' ? '9.2pt' : '9pt'};
+      page-break-inside: avoid;
+      page-break-after: avoid;
+    }
+    /* On screen, give the preview a light border so it reads as a page */
+    @media screen {
+      body { background: #f3f4f6; padding: 16px; }
+      .page { box-shadow: 0 1px 8px rgba(0,0,0,.15); background: #fff; padding: 0; }
+    }
+    /* Push the signature block to the bottom of the page */
+    .spacer { flex: 1 1 auto; min-height: 8px; }
+    /* Never break a table row or the signatures across pages */
+    table.items, .sigs, .header, .info-grid { page-break-inside: avoid; }
+    tr { page-break-inside: avoid; }
+
     .header {
       display: flex;
       justify-content: space-between;
@@ -466,7 +499,7 @@ export function printChallan(
       background: #f3f4f6; font-weight: 800; font-size: 8.5pt;
     }
     .remarks { font-size: 8.5pt; color: #6b7280; margin-bottom: 6px; }
-    .sigs     { display: flex; justify-content: space-between; margin-top: 28px; }
+    .sigs     { display: flex; justify-content: space-between; margin-top: 10px; }
     .sig-box  { text-align: center; min-width: 140px; }
     .sig-line { height: 28px; }
     .sig-rule { border-top: 1px solid #374151; padding-top: 4px; }
@@ -475,6 +508,7 @@ export function printChallan(
   </style>
 </head>
 <body>
+ <div class="page">
   <!-- HEADER -->
   <div class="header">
     <div>
@@ -540,6 +574,9 @@ export function printChallan(
   <!-- REMARKS -->
   ${remarks ? `<div class="remarks"><strong style="color:#374151">Remarks:</strong> ${esc(remarks)}</div>` : ''}
 
+  <!-- Push signatures to the bottom of the single page -->
+  <div class="spacer"></div>
+
   <!-- SIGNATURES -->
   <div class="sigs">
     <div class="sig-box">
@@ -564,6 +601,7 @@ export function printChallan(
       </div>
     </div>
   </div>
+ </div>
 </body>
 </html>`;
 
@@ -579,13 +617,21 @@ export function printChallan(
   }
   win.document.write(html);
   win.document.close();
-  // Wait for resources to load then print
-  win.onload = () => {
+
+  // Print reliably across browsers. onload is preferred, but document.write
+  // can settle before the handler attaches, so we also arm a short fallback.
+  let printed = false;
+  const doPrint = () => {
+    if (printed) return;
+    printed = true;
     win.focus();
     win.print();
-    // Close after print dialog closes (works in Chrome/Edge; Firefox keeps it open)
+    // Close after the print dialog dismisses (Chrome/Edge; Firefox keeps it open)
     win.onafterprint = () => win.close();
   };
+  win.onload = doPrint;
+  // Fallback in case onload already fired
+  setTimeout(doPrint, 400);
 }
 
 // Keep CHALLAN_PRINT_CSS exported so callers don't get import errors,

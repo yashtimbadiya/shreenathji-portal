@@ -11,6 +11,7 @@ import { ProductDetailPage } from './pages/ProductDetailPage';
 import { AddProductPage, ProductsPage, EditProductPage } from './pages/ProductsPage';
 import { ReceivePage, ReceiptHistoryPage, ReceiptDetailPage } from './pages/ReceivePage';
 import { VendorDetailPage } from './pages/VendorDetailPage';
+import { VendorStatementPage } from './pages/VendorStatementPage';
 import { VendorsPage } from './pages/VendorsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { PaymentsPage } from './pages/PaymentsPage';
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="products/:id/edit" element={<EditProductPage />} />
         <Route path="vendors" element={<VendorsPage />} />
         <Route path="vendors/:id" element={<VendorDetailPage />} />
+        <Route path="vendors/:id/statement" element={<VendorStatementPage />} />
         <Route path="receive">
           <Route index element={<Navigate to="new" replace />} />
           <Route path="new" element={<ReceivePage />} />

@@ -23,12 +23,21 @@ function getPendingQuantity(job: JobWork) {
   );
 }
 
-function getPaymentStatus(payments: any[]) {
-  const totalPaid   = payments.reduce((sum, p) => sum + p.paid,   0);
-  const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-  if (!payments.length)        return 'Pending';
-  if (totalPaid >= totalAmount) return 'Paid';
-  if (totalPaid > 0)            return 'Partial';
+/** The total bill for a job = Σ(sentQuantity × rate). Mirrors PaymentsPage. */
+function getJobBillAmount(job: JobWork) {
+  return job.items.reduce((sum, item) => sum + item.sentQuantity * (item.rate ?? 0), 0);
+}
+
+/**
+ * Payment status is derived from cumulative amount paid against the job's
+ * single bill amount — NOT the sum of `payment.amount`, because every payment
+ * record stores the full bill in `amount` (so summing it multiplies the bill
+ * by the number of installments).
+ */
+function getPaymentStatus(totalPaid: number, billAmount: number): 'Paid' | 'Partial' | 'Pending' {
+  if (billAmount <= 0) return 'Pending';
+  if (totalPaid >= billAmount) return 'Paid';
+  if (totalPaid > 0) return 'Partial';
   return 'Pending';
 }
 
@@ -90,7 +99,7 @@ export function ReportsPage() {
   );
 
   const filteredPayments = useMemo(
-    () => payments.filter((p) => p.date >= filters.from && p.date <= filters.to && filteredJobIds.has(p.jobWorkId)),
+    () => payments.filter((p) => p.date >= filters.from && p.date <= filters.to && p.jobWorkId != null && filteredJobIds.has(p.jobWorkId)),
     [payments, filters.from, filters.to, filteredJobIds],
   );
 
@@ -110,9 +119,9 @@ export function ReportsPage() {
       const receivedQuantity = job.items.reduce((s, i) => s + i.receivedQuantity + i.rejectedQuantity + i.lossQuantity, 0);
       const pendingQuantity  = getPendingQuantity(job);
 
-      const totalPaidAmount  = paymentEntries.reduce((s, p) => s + p.paid,   0);
-      const totalAmount      = paymentEntries.reduce((s, p) => s + p.amount, 0);
-      const remainingAmount  = Math.max(0, totalAmount - totalPaidAmount);
+      const totalPaidAmount  = paymentEntries.reduce((s, p) => s + p.paid, 0);
+      const billAmount       = getJobBillAmount(job);
+      const remainingAmount  = Math.max(0, billAmount - totalPaidAmount);
 
       const latestDispatch = [...dispatchEntries].sort((a, b) => b.date.localeCompare(a.date))[0];
       const latestReceipt  = [...receiptEntries].sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -135,7 +144,7 @@ export function ReportsPage() {
         paymentType:   latestPayment?.paymentType ?? '—',
         paymentAmount: totalPaidAmount,
         remainingAmount,
-        paymentStatus: totalAmount > 0 ? getPaymentStatus(paymentEntries) : 'Pending',
+        paymentStatus: getPaymentStatus(totalPaidAmount, billAmount),
         priority: job.priority,
       };
     });

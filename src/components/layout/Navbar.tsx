@@ -2,7 +2,7 @@ import { Bell, Calendar, HelpCircle, LogOut, Search, User, RefreshCw, X } from '
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore';
-import { LEADER_KEY, SHORTCUTS, SHORTCUT_GROUPS, type Shortcut } from '../../lib/shortcuts';
+import { SHORTCUTS, SHORTCUT_GROUPS, type Shortcut } from '../../lib/shortcuts';
 import type { SearchResult } from '../../types';
 
 // ── Global search ─────────────────────────────────────────────────────────────
@@ -82,9 +82,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
           <div>
             <h2 className="text-base font-bold text-charcoal">Keyboard Shortcuts</h2>
             <p className="text-xs text-muted mt-0.5">
-              Press&nbsp;
-              <Kbd>{LEADER_KEY.toUpperCase()}</Kbd>
-              &nbsp;to arm the sequence, then the second key to navigate
+              Press a single key to jump to any section
             </p>
           </div>
           <button
@@ -99,7 +97,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
         {/* Body */}
         <div className="p-6 max-h-[70vh] overflow-y-auto">
 
-          {/* Leader-key shortcuts grid */}
+          {/* Single-key shortcuts grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {grouped.map(({ group, items }) => (
               <div key={group}>
@@ -109,8 +107,6 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
                     <div key={s.key} className="flex items-center justify-between gap-4 rounded-lg px-3 py-1.5 hover:bg-surface transition-colors">
                       <span className="text-sm text-charcoal">{s.label}</span>
                       <div className="flex items-center gap-1 shrink-0">
-                        <Kbd>{LEADER_KEY.toUpperCase()}</Kbd>
-                        <span className="text-muted text-xs">then</span>
                         <Kbd>{s.key.toUpperCase()}</Kbd>
                       </div>
                     </div>
@@ -128,7 +124,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
             <p className="text-[10px] font-bold uppercase tracking-wider text-muted mb-2">Other Shortcuts</p>
             <div className="space-y-1">
               {[
-                { keys: ['Ctrl', '⇧', 'N'], label: 'Create Job Work (anywhere)' },
+                { keys: ['N'],               label: 'New item on the current page' },
                 { keys: ['?'],               label: 'Open this shortcut help' },
                 { keys: ['Esc'],             label: 'Go back / close / cancel' },
                 { keys: ['Ctrl', '↵'],       label: 'Save / Confirm & Dispatch' },
@@ -264,11 +260,11 @@ export function Navbar({ shortcutsOpen, onToggleShortcuts }: NavbarProps) {
 
         {/* Shortcut hint badge + help button */}
         <div className="hidden lg:flex items-center gap-2">
-          {/* Leader-key hint */}
+          {/* Single-key hint */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-surface text-xs text-muted">
-            <Kbd>{LEADER_KEY.toUpperCase()}</Kbd>
-            <span className="text-muted/60">+</span>
-            <span>key to navigate</span>
+            <span>Press</span>
+            <Kbd>?</Kbd>
+            <span>for shortcuts</span>
           </div>
 
           {/* ? button → shortcuts overlay */}

@@ -3,19 +3,21 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Single source of truth for all global keyboard shortcuts.
  *
- * Pattern — Gmail-style "G then <key>" leader sequence:
- *   1. Press  G  (while focus is NOT inside an input/textarea/select)
- *   2. A 1500 ms window opens — a small toast indicator shows "G · …"
- *   3. Press the second key to navigate
- *   4. If no second key arrives within 1500 ms the sequence is cancelled
+ * Pattern — DIRECT single-key navigation (no leader, no Ctrl combos):
+ *   Press a single letter (while focus is NOT inside an input/textarea/select
+ *   and no modal/dropdown is open) to jump straight to that section.
  *
- * Non-leader shortcuts (Ctrl / direct):
- *   Ctrl+Shift+N  → Create Job Work   (kept from existing code)
- *   ?             → Toggle shortcut help overlay
+ * Reserved single keys handled elsewhere:
+ *   n  → contextual "New" on the current page (useNewItemShortcut)
+ *   ?  → toggle the shortcut help overlay
+ *   Escape → back / close (useGlobalEscNavigation)
+ *
+ * Because these are single keys, every letter below must be UNIQUE and must
+ * not collide with the reserved keys above.
  */
 
 export interface Shortcut {
-  /** Second key after G (lowercase) */
+  /** The single key that triggers navigation (lowercase) */
   key: string;
   /** Human-readable label shown in the help overlay */
   label: string;
@@ -25,6 +27,8 @@ export interface Shortcut {
   group: string;
 }
 
+// Kept for backward-compatibility with any importers; the leader sequence is
+// no longer used now that shortcuts are direct single keys.
 export const LEADER_KEY = 'g';
 export const LEADER_TIMEOUT_MS = 1500;
 
@@ -33,7 +37,6 @@ export const SHORTCUTS: Shortcut[] = [
   { key: 'd', label: 'Dashboard',       path: '/dashboard',        group: 'Navigate' },
   // ── Job Work ─────────────────────────────────────────────────────────────
   { key: 'j', label: 'All Job Works',   path: '/job-works',        group: 'Job Work'  },
-  { key: 'n', label: 'Create Job Work', path: '/job-works/create', group: 'Job Work'  },
   // ── Operations ───────────────────────────────────────────────────────────
   { key: 'r', label: 'Receive Material',path: '/receive/new',      group: 'Operations'},
   { key: 'c', label: 'All Challans',    path: '/challans',         group: 'Operations'},

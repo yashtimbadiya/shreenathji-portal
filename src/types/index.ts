@@ -32,6 +32,8 @@ export interface Settings {
   challanPrefix: string;
   receiptPrefix: string;
   invoicePrefix: string;
+  /** Vendor payment receipt prefix, e.g. PR-YYYY-##### */
+  paymentReceiptPrefix: string;
 }
 
 export interface Category {
@@ -193,10 +195,13 @@ export interface StockTransaction {
   user: string;
 }
 
+export type PaymentMethod = 'Cash' | 'Bank Transfer' | 'UPI' | 'Cheque' | 'Other';
+
 export interface Payment {
   id: string;
   vendorId: string;
-  jobWorkId: string;
+  /** Optional — vendor-level (monthly) settlements are not tied to a single job. */
+  jobWorkId?: string;
   process: string;
   quantity: number;
   rate: number;
@@ -206,6 +211,14 @@ export interface Payment {
   paymentType: 'Advance' | 'Running' | 'Final' | 'Balance';
   date: string;
   remarks?: string;
+  /** Vendor-payment receipt number, e.g. PR-2026-00001 */
+  receiptNumber?: string;
+  /** How the money was paid */
+  method?: PaymentMethod;
+  /** Cheque no. / UTR / txn reference */
+  reference?: string;
+  /** Settlement period this payment covers, e.g. "2026-09" (YYYY-MM) */
+  period?: string;
 }
 
 export interface ActivityLog {

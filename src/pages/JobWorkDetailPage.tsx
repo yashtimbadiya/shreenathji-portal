@@ -4,7 +4,7 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, KPICard, PageHeader } from '../components/ui/Card';
-import { Input, SearchableSelect, Select, Textarea } from '../components/ui/Input';
+import { focusNextInForm, Input, SearchableSelect, Select, Textarea } from '../components/ui/Input';
 import { ConfirmDialog, BlockedDeleteDialog } from '../components/ui/Modal';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import {
@@ -19,6 +19,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useEscapeBack } from '../hooks/useEscapeBack';
 import { sortByDateDesc } from '../lib/sorting';
 import { PriorityBadge } from '../components/ui/PriorityBadge';
+import { formatDocumentNumber, getDocumentSerial } from '../lib/documentNumbering';
 
 const TIMELINE_STEPS = ['Job Created', 'Material Dispatched', 'Vendor Processing', 'Partial Receipt', 'QC', 'Completed'];
 
@@ -547,8 +548,13 @@ export function EditJobWorkPage() {
   const dispatches   = useAppStore((s) => s.dispatches);
   const receipts     = useAppStore((s) => s.receipts);
   const updateJobWork = useAppStore((s) => s.updateJobWork);
+  const changeJobNumber = useAppStore((s) => s.changeJobNumber);
+  const isJobSerialAvailable = useAppStore((s) => s.isJobSerialAvailable);
+  const jobWorkPrefix = useAppStore((s) => s.settings.jobWorkPrefix);
 
   const job = jobWorks.find((j) => j.id === id);
+
+  const currentSerial = job ? getDocumentSerial(job.jobNumber, jobWorkPrefix) : null;
 
   // ── Local form state ──────────────────────────────────────────────────────
   const [vendorId,      setVendorId]      = useState(job?.vendorId ?? '');
@@ -557,9 +563,18 @@ export function EditJobWorkPage() {
   const [expectedDate,  setExpectedDate]  = useState(job?.expectedReturnDate ?? '');
   const [priority,      setPriority]      = useState<'Normal' | 'High' | 'Urgent'>(job?.priority ?? 'Normal');
   const [remarks,       setRemarks]       = useState(job?.remarks ?? '');
+  const [jobSerialInput, setJobSerialInput] = useState(currentSerial != null ? String(currentSerial) : '');
+
+  const parsedSerial = Number.parseInt(jobSerialInput, 10);
+  const serialIsValidNumber = Number.isFinite(parsedSerial) && parsedSerial > 0;
+  const serialError = !serialIsValidNumber
+    ? 'Enter a valid number'
+    : (job && !isJobSerialAvailable(parsedSerial, job.id))
+      ? 'This job number already exists'
+      : '';
 
   const submitRef = useRef<HTMLButtonElement>(null);
-  const canSave   = !!vendorId && !!expectedDate;
+  const canSave   = !!vendorId && !!expectedDate && !serialError;
 
   // Ctrl+Enter → save
   useEffect(() => {
@@ -589,6 +604,13 @@ export function EditJobWorkPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
+
+    // If the job number changed, validate + apply it first; abort on conflict.
+    if (serialIsValidNumber && parsedSerial !== currentSerial) {
+      const ok = changeJobNumber(job.id, parsedSerial);
+      if (!ok) return; // duplicate — store already showed the error toast
+    }
+
     updateJobWork(job.id, {
       vendorId,
       process,
@@ -631,13 +653,39 @@ export function EditJobWorkPage() {
         <form onSubmit={handleSubmit} data-form>
           <Card className="p-6 max-w-2xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Job number — read-only */}
-              <Input
-                label="Job Number"
-                value={job.jobNumber}
-                disabled
-                tabIndex={-1}
-              />
+              {/* Job number — editable with duplicate check */}
+              <div>
+                <label className="text-sm font-medium text-charcoal" htmlFor="edit-job-serial">Job Number</label>
+                <div className="mt-1 flex items-stretch rounded-lg border border-border overflow-hidden focus-within:ring-2 focus-within:ring-brand/20 focus-within:border-brand">
+                  <span className="inline-flex items-center px-3 bg-surface text-xs font-mono text-muted border-r border-border whitespace-nowrap">
+                    {jobWorkPrefix.replace(/#+/, '').replace(/Y{4}/, String(new Date().getFullYear()))}
+                  </span>
+                  <input
+                    id="edit-job-serial"
+                    type="number"
+                    min={1}
+                    value={jobSerialInput}
+                    onChange={(e) => setJobSerialInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        focusNextInForm(e.currentTarget, e.shiftKey);
+                      }
+                    }}
+                    className="flex-1 w-full px-3 py-2 text-sm text-charcoal focus:outline-none"
+                    aria-invalid={!!serialError}
+                  />
+                </div>
+                {serialError ? (
+                  <p className="mt-1 text-xs text-danger">{serialError}</p>
+                ) : serialIsValidNumber && parsedSerial !== currentSerial ? (
+                  <p className="mt-1 text-xs text-muted">
+                    Will change to <span className="font-medium text-charcoal">{formatDocumentNumber(jobWorkPrefix, parsedSerial)}</span> · #{currentSerial} will be freed for reuse
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-muted">Editable — must be unique.</p>
+                )}
+              </div>
 
               <SearchableSelect
                 label="Vendor *"

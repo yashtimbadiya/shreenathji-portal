@@ -1,20 +1,23 @@
 /**
  * useAutoBackup
  *
- * Mount once at the app root (AppLayout).
+ * Mount once at the app root (AppLayout). Handles automatic folder backups the
+ * way Miracle-style accounting software does — quietly, without surprising the
+ * user with downloads.
  *
- * Mirrors Miracle accounting-software backup behaviour:
+ *  ON LOAD        — Once per session, if a backup folder is configured and its
+ *                   permission is still granted, write a dated backup.
  *
- *  ON CLOSE / UNLOAD — When the user closes the tab or app, a backup is attempted.
- *                   • Chrome / Edge (FSA supported + folder set)  → folder write
- *                   • Firefox / Safari, OR no folder configured   → browser
- *                     download (.xlsx lands in Downloads folder automatically)
+ *  AFTER CHANGES  — The store calls scheduleBackup() after every mutation, which
+ *                   debounces ~10 s and then writes to the folder (permission
+ *                   permitting). That logic lives in autoBackup.ts.
  *
- *  No backups are triggered by load, minimize, tab switching, reload, or data
- *  mutations.
- *
- *  MANUAL          — "Backup Now" in Settings always calls writeBackupToFolder()
- *                    or triggerDownloadBackup() directly.
+ *  ON CLOSE       — When the tab/app is closing (pagehide) we attempt one final
+ *                   folder write if permission is already granted. We do NOT
+ *                   auto-download on close: browsers fire pagehide on ordinary
+ *                   reloads and navigations too, which would spam the Downloads
+ *                   folder. Firefox/Safari (no folder API) rely on the on-change
+ *                   debounce plus the manual "Backup Now" / Export buttons.
  *
  * Nothing is ever deleted from the backup folder.
  */
@@ -22,84 +25,50 @@
 import { useEffect, useRef } from 'react';
 import {
   supportsFileSystemAccess,
-  writeBackupToFolder,
-  triggerDownloadBackup,
-  loadDirectoryHandle,
+  runAutoBackup,
+  backupIfPermitted,
   cancelScheduledBackup,
 } from '../api/autoBackup';
 
 export function useAutoBackup() {
-  /** Prevents duplicate close/unload attempts during one lifecycle event. */
+  /** Ensures the on-load backup runs at most once per mount. */
+  const loadedRef = useRef(false);
+  /** Prevents duplicate close attempts during a single unload event. */
   const closingRef = useRef(false);
 
-  // ── ON CLOSE / UNLOAD: write one backup ─────────────────────────────────────
+  // ── ON LOAD: one folder backup this session (if permission already granted) ─
   useEffect(() => {
-    /**
-     * Attempt to write a backup when the app is about to close or be hidden.
-     *
-     * Strategy:
-     *  1. If FSA is supported AND a folder is already configured with active
-     *     permission → write to folder (silent, no user interaction needed).
-     *  2. Otherwise → trigger a browser download so the user still gets a
-     *     local .xlsx in their Downloads folder automatically.
-     *
-     * We use fire-and-forget Promises because close/hide event handlers cannot
-     * be made async. Chrome/Edge keep the page alive ~500 ms for FSA writes,
-     * which is enough. The download fallback uses a Blob URL + <a>.click()
-     * which completes synchronously enough to survive the page unload budget.
-     */
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    // Fire-and-forget; skips silently when no folder/permission.
+    void runAutoBackup();
+  }, []);
+
+  // ── ON CLOSE / UNLOAD: one final folder write (no download fallback) ───────
+  useEffect(() => {
     const attemptBackupOnClose = () => {
       if (closingRef.current) return;
       closingRef.current = true;
 
-      // Cancel any pending debounced backup — we are writing right now
+      // We're writing now — cancel any pending debounced write.
       cancelScheduledBackup();
 
-      if (supportsFileSystemAccess) {
-        // Try folder write first
-        loadDirectoryHandle().then((handle) => {
-          if (!handle) {
-            // No folder configured — fall back to download
-            triggerDownloadBackup().catch(() => { /* ignore on unload */ });
-            return;
-          }
-          // Only proceed if permission is already granted (can't prompt on close)
-          const h = handle as unknown as {
-            queryPermission(opts: { mode: string }): Promise<PermissionState>;
-          };
-          h.queryPermission({ mode: 'readwrite' })
-            .then((status) => {
-              if (status === 'granted') {
-                writeBackupToFolder().then((ok) => {
-                  if (!ok) {
-                    // Permission lapsed — fall back to download
-                    triggerDownloadBackup().catch(() => { /* ignore */ });
-                  }
-                });
-              } else {
-                // Permission not active — fall back to download
-                triggerDownloadBackup().catch(() => { /* ignore */ });
-              }
-            })
-            .catch(() => {
-              triggerDownloadBackup().catch(() => { /* ignore */ });
-            });
-        });
-      } else {
-        // FSA not available (Firefox, Safari) — always download
-        triggerDownloadBackup().catch(() => { /* ignore on unload */ });
-      }
+      // Only the File System Access path is safe on unload. A download here
+      // would fire on every reload/navigation, so we deliberately skip it.
+      if (!supportsFileSystemAccess) return;
+
+      // Fire-and-forget: unload handlers cannot await. Chrome/Edge keep the
+      // page alive briefly, which is enough for the folder write to flush.
+      void backupIfPermitted();
     };
 
-    // pagehide does not fire for minimize or ordinary tab switching.
-    const onPageHide = () => {
-      attemptBackupOnClose();
-    };
-
-    window.addEventListener('pagehide',           onPageHide);
+    // pagehide fires on close, navigation, and reload — but not on minimize
+    // or ordinary tab switching, which is exactly what we want.
+    const onPageHide = () => attemptBackupOnClose();
+    window.addEventListener('pagehide', onPageHide);
 
     return () => {
-      window.removeEventListener('pagehide',           onPageHide);
+      window.removeEventListener('pagehide', onPageHide);
     };
   }, []);
 }

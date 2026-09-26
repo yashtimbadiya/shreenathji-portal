@@ -149,13 +149,17 @@ export function ReceivePage() {
   const handleConfirm = () => {
     if (!job) return;
     const items = job.items
-      .map((item) => ({
-        jobWorkItemId: item.id,
-        variantId:     item.variantId,
-        received:      Number(receiveQty[item.id] ?? 0),
-        rejected:      0,
-        loss:          0,
-      }))
+      .map((item) => {
+        const received = Number(receiveQty[item.id] ?? 0);
+        return {
+          jobWorkItemId: item.id,
+          variantId:     item.variantId,
+          // Guard against NaN from cleared/invalid inputs
+          received:      Number.isFinite(received) ? received : 0,
+          rejected:      0,
+          loss:          0,
+        };
+      })
       .filter((i) => i.received > 0);
 
     if (items.length === 0) {
@@ -163,9 +167,13 @@ export function ReceivePage() {
       return;
     }
 
+    // Pending = sent − already received − already rejected − already lost.
+    // Receiving must never exceed the true outstanding quantity.
     const invalid = items.find((i) => {
       const ji = job.items.find((ji) => ji.id === i.jobWorkItemId);
-      return ji ? i.received > (ji.sentQuantity - ji.receivedQuantity) : false;
+      if (!ji) return false;
+      const pending = ji.sentQuantity - ji.receivedQuantity - ji.rejectedQuantity - ji.lossQuantity;
+      return i.received > pending;
     });
 
     if (invalid) {

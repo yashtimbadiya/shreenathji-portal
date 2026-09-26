@@ -97,7 +97,7 @@ export function InventoryPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface sticky top-0">
-                {['Product', 'Variant', 'Category', 'Factory Stock', 'With Vendor', 'Total', 'Unit'].map((h) => (
+                {['Product', 'Variant', 'Category', 'Factory Stock', 'With Vendor', 'Rejected', 'Total', 'Unit'].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted uppercase">{h}</th>
                 ))}
               </tr>
@@ -112,6 +112,7 @@ export function InventoryPage() {
                   <td className="px-4 py-3">{row.category}</td>
                   <td className="px-4 py-3">{row.factoryStock.toLocaleString()}</td>
                   <td className="px-4 py-3">{row.withVendor.toLocaleString()}</td>
+                  <td className="px-4 py-3">{row.rejected.toLocaleString()}</td>
                   <td className="px-4 py-3 font-medium">{row.total.toLocaleString()}</td>
                   <td className="px-4 py-3">{row.unit}</td>
                 </tr>

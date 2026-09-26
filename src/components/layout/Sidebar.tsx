@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { SHORTCUTS, LEADER_KEY } from '../../lib/shortcuts';
+import { SHORTCUTS } from '../../lib/shortcuts';
 
 // ── Shortcut badge ────────────────────────────────────────────────────────────
 // Build a path → shortcut-key lookup once at module level (no re-computation).
@@ -22,19 +22,14 @@ SHORTCUTS.forEach((s) => { PATH_TO_KEY[s.path] = s.key.toUpperCase(); });
 
 /**
  * Small badge shown beside a nav item that has a keyboard shortcut.
- * Displays as  G·X  in a muted pill — visible but unobtrusive.
+ * Shortcuts are now single-key (press the letter to jump), so this shows a
+ * single muted key pill — visible but unobtrusive.
  */
 function ShortcutBadge({ path }: { path: string }) {
   const key = PATH_TO_KEY[path];
   if (!key) return null;
   return (
-    <span className="ml-auto shrink-0 inline-flex items-center gap-0.5">
-      <kbd className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded
-                      bg-surface border border-border text-[9px] font-mono font-bold
-                      text-muted leading-none shadow-sm">
-        {LEADER_KEY.toUpperCase()}
-      </kbd>
-      <span className="text-muted text-[9px] font-mono leading-none">·</span>
+    <span className="ml-auto shrink-0 inline-flex items-center">
       <kbd className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded
                       bg-surface border border-border text-[9px] font-mono font-bold
                       text-muted leading-none shadow-sm">

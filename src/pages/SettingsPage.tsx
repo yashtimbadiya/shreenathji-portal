@@ -20,6 +20,7 @@ import {
   getLastBackupTime,
   loadBackupHistory,
   clearBackupHistory,
+  BACKUP_EVENT,
   type BackupHistoryEntry,
 } from '../api/autoBackup';
 
@@ -78,6 +79,16 @@ export function SettingsPage() {
       if (!ok) await clearDirectoryHandle();
     });
     void refreshHistory();
+  }, [refreshHistory]);
+
+  // Live-refresh when an automatic (debounced / on-load) backup completes
+  useEffect(() => {
+    const onBackup = () => {
+      setLastBackupTime(getLastBackupTime());
+      void refreshHistory();
+    };
+    window.addEventListener(BACKUP_EVENT, onBackup);
+    return () => window.removeEventListener(BACKUP_EVENT, onBackup);
   }, [refreshHistory]);
 
   const handleChooseFolder = async () => {
@@ -151,6 +162,7 @@ export function SettingsPage() {
         { name: 'challanPrefix',  label: 'Challan Prefix',   type: 'text' },
         { name: 'receiptPrefix',  label: 'Receipt Prefix',   type: 'text' },
         { name: 'invoicePrefix',  label: 'Invoice Prefix',   type: 'text' },
+        { name: 'paymentReceiptPrefix', label: 'Payment Receipt Prefix', type: 'text' },
       ],
     },
   ], []);
@@ -233,7 +245,8 @@ export function SettingsPage() {
           <p className="text-xs text-muted mb-5">
             Point the app to a folder on your computer. Every backup is saved as a new dated
             file — nothing is ever overwritten or deleted, giving you a complete history.
-            Backups run automatically when the tab or app is closed, and can also be started manually.
+            Once a folder is set, backups run automatically: when you open the app, a few seconds
+            after you make changes, and when you close the tab. You can also back up manually anytime.
             {!supportsFileSystemAccess && (
               <span className="block mt-1 text-orange-600 font-medium">
                 ⚠ Folder access requires Chrome or Edge 86+. On Firefox/Safari a .xlsx file is
@@ -331,10 +344,12 @@ export function SettingsPage() {
             <div className="rounded-lg bg-surface border border-border px-4 py-3 text-xs text-muted space-y-1.5">
               <p className="font-semibold text-charcoal text-xs">How it works</p>
               <p>📁 Each backup = a new dated file — nothing is ever overwritten or deleted.</p>
-              <p>🔒 Runs automatically when you <strong>close or unload</strong> the tab or app.</p>
-              <p>⏸ Does not run when you minimize, switch tabs, or edit data. Browsers may also fire the close event during a reload.</p>
-              {!supportsFileSystemAccess && (
-                <p className="text-orange-600 font-medium">⚠ Chrome/Edge: saves to folder. Firefox/Safari: downloads to your Downloads folder.</p>
+              <p>🔄 Runs on <strong>open</strong>, a few seconds after you <strong>make changes</strong>, and on <strong>close</strong>.</p>
+              <p>🔒 Automatic writes are silent — they use the folder you already approved and never pop up a prompt.</p>
+              {!supportsFileSystemAccess ? (
+                <p className="text-orange-600 font-medium">⚠ This browser can't write to a folder. Use "Download Backup" or Export instead (Chrome/Edge support folders).</p>
+              ) : (
+                <p>⏸ Won't run on minimize or tab switching. If permission lapses, click "Backup Now" to re-approve.</p>
               )}
             </div>
           </div>

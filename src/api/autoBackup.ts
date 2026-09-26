@@ -314,12 +314,19 @@ export async function buildWorkbook(): Promise<WorkbookResult> {
 // ─── Timestamp helpers ────────────────────────────────────────────────────────
 const LAST_BACKUP_KEY = 'snj:last-auto-backup';
 
+/** Fired whenever a backup completes so open UI (Settings) can refresh live. */
+export const BACKUP_EVENT = 'snj:backup-complete';
+
 export function getLastBackupTime(): string | null {
   return localStorage.getItem(LAST_BACKUP_KEY);
 }
 
 export function setLastBackupTime(): void {
   localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+  // Notify any listening UI (Settings page) that a backup just happened.
+  try {
+    window.dispatchEvent(new CustomEvent(BACKUP_EVENT));
+  } catch { /* SSR / no window — ignore */ }
 }
 
 // ─── Core write — ATOMIC, new dated file every time, NOTHING deleted ─────────
@@ -403,16 +410,24 @@ export async function triggerDownloadBackup(): Promise<void> {
 }
 
 // ─── Debounced mutation backup ────────────────────────────────────────────────
-// Called after every data mutation.  Waits 10 s for activity to settle,
-// then writes to the folder if one is configured with active permission.
-// Background writes cannot request permission — they skip silently if the
-// browser has revoked it.  The next "Backup Now" click will re-prompt.
+// Called after every data mutation. Waits BACKUP_DEBOUNCE_MS for activity to
+// settle, then writes to the configured folder — but ONLY if permission is
+// already granted (a background write can't prompt). If no folder is set, or
+// permission has lapsed, it silently skips: we never trigger a surprise
+// download on every keystroke. Manual "Backup Now" handles those cases.
 
+const BACKUP_DEBOUNCE_MS = 10_000;
 let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function scheduleBackup(): void {
-  // Automatic backups are handled by the close/unload lifecycle hook.
+  // Folder backups only make sense where the File System Access API exists.
+  if (!supportsFileSystemAccess) return;
+
   cancelScheduledBackup();
+  _debounceTimer = setTimeout(() => {
+    _debounceTimer = null;
+    void backupIfPermitted();
+  }, BACKUP_DEBOUNCE_MS);
 }
 
 export function cancelScheduledBackup(): void {
@@ -422,6 +437,29 @@ export function cancelScheduledBackup(): void {
   }
 }
 
+/**
+ * Write to the folder only if one is configured AND permission is already
+ * granted (query only — never prompts). Safe to call from timers / unload.
+ * Returns the filename written, or null if it skipped or failed.
+ */
+export async function backupIfPermitted(): Promise<string | null> {
+  if (!supportsFileSystemAccess) return null;
+  const handle = await loadDirectoryHandle();
+  if (!handle) return null;
+
+  try {
+    const h = handle as unknown as {
+      queryPermission(opts: { mode: string }): Promise<PermissionState>;
+    };
+    const status = await h.queryPermission({ mode: 'readwrite' });
+    if (status !== 'granted') return null;
+  } catch {
+    return null;
+  }
+
+  return writeBackupToFolder();
+}
+
 // ─── On-load backup (runs every time the app opens) ──────────────────────────
 /**
  * Called by useAutoBackup on every mount.
@@ -429,26 +467,10 @@ export function cancelScheduledBackup(): void {
  * Unlike the old version there is NO "already backed up today" gate —
  * every session gets its own backup file.
  */
-export async function runAutoBackup(): Promise<'folder' | 'download' | 'skipped'> {
-  // FSA path — folder backup
-  if (supportsFileSystemAccess) {
-    const handle = await loadDirectoryHandle();
-    if (handle) {
-      const h = handle as unknown as {
-        queryPermission(opts: { mode: string }): Promise<PermissionState>;
-      };
-      try {
-        const status = await h.queryPermission({ mode: 'readwrite' });
-        if (status === 'granted') {
-          const filename = await writeBackupToFolder();
-          return filename ? 'folder' : 'skipped';
-        }
-      } catch { /* fall through */ }
-    }
-    return 'skipped';
-  }
-
-  // No FSA — don't auto-download on load (that would be annoying).
-  // On-close download is handled by useAutoBackup instead.
-  return 'skipped';
+export async function runAutoBackup(): Promise<'folder' | 'skipped'> {
+  // Folder write only when permission is already granted (never prompts on load).
+  // No FSA / no folder / no permission → skip silently. We never auto-download
+  // on load; that would be annoying. Manual "Backup Now" covers those cases.
+  const filename = await backupIfPermitted();
+  return filename ? 'folder' : 'skipped';
 }

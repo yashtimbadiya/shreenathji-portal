@@ -19,6 +19,7 @@ export function DispatchPage() {
   const products = useAppStore((s) => s.products);
   const currentUser = useAppStore((s) => s.currentUser);
   const createDispatch = useAppStore((s) => s.createDispatch);
+  const addToast = useAppStore((s) => s.addToast);
 
   const [jobId, setJobId] = useState(searchParams.get('job') ?? '');
   const [vehicleNumber, setVehicleNumber] = useState('');
@@ -46,15 +47,32 @@ export function DispatchPage() {
 
   const handleDispatch = () => {
     if (!job) return;
+
+    // Reject invalid (negative / NaN) quantities before building the payload
+    const hasInvalid = job.items.some((item) => {
+      const q = quantities[item.id];
+      return q !== undefined && (!Number.isFinite(q) || q < 0);
+    });
+    if (hasInvalid) {
+      addToast('Enter a valid, non-negative dispatch quantity.', 'error');
+      return;
+    }
+
     const dispatchItems = job.items
-      .map((item) => ({
-        jobWorkItemId: item.id,
-        variantId: item.variantId,
-        quantity: quantities[item.id] ?? 0,
-      }))
+      .map((item) => {
+        const q = quantities[item.id] ?? 0;
+        return {
+          jobWorkItemId: item.id,
+          variantId: item.variantId,
+          quantity: Number.isFinite(q) ? q : 0,
+        };
+      })
       .filter((i) => i.quantity > 0);
 
-    if (dispatchItems.length === 0) return;
+    if (dispatchItems.length === 0) {
+      addToast('Enter at least one dispatch quantity.', 'error');
+      return;
+    }
 
     const id = createDispatch({
       jobWorkId: job.id,
@@ -125,7 +143,18 @@ export function DispatchPage() {
                             type="number"
                             min={0}
                             value={quantities[item.id] ?? ''}
-                            onChange={(e) => setQuantities((q) => ({ ...q, [item.id]: Number(e.target.value) }))}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setQuantities((q) => {
+                                if (raw === '') {
+                                  const next = { ...q };
+                                  delete next[item.id];
+                                  return next;
+                                }
+                                const n = Number(raw);
+                                return { ...q, [item.id]: Number.isFinite(n) ? n : 0 };
+                              });
+                            }}
                             className="w-24 px-2 py-1 border border-border rounded text-sm"
                           />
                         </td>

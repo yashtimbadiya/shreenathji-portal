@@ -1,5 +1,5 @@
 import { ChevronRight, ExternalLink, Printer, Plus, Tag, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, PageHeader } from '../components/ui/Card';
@@ -225,12 +225,36 @@ export function CreateJobWorkPage() {
   const currentUser    = useAppStore((s) => s.currentUser);
   const createJobWork  = useAppStore((s) => s.createJobWork);
   const createDispatch = useAppStore((s) => s.createDispatch);
+  const addToast       = useAppStore((s) => s.addToast);
   const jobCounter     = useAppStore((s) => s.jobCounter);
   const availableJobNumbers = useAppStore((s) => s.availableJobNumbers);
   const jobWorkPrefix = useAppStore((s) => s.settings.jobWorkPrefix);
+  const isJobSerialAvailable = useAppStore((s) => s.isJobSerialAvailable);
 
   const reusableJobNumber = [...availableJobNumbers].sort((a, b) => a - b)[0];
-  const nextJobNumber = formatDocumentNumber(jobWorkPrefix, reusableJobNumber ?? jobCounter + 1);
+  const autoSerial = reusableJobNumber ?? jobCounter + 1;
+  const nextJobNumber = formatDocumentNumber(jobWorkPrefix, autoSerial);
+
+  // Editable job-number serial. Follows the auto value until the user edits it.
+  const [jobSerialInput, setJobSerialInput] = useState<string>(String(autoSerial));
+  const [serialTouched, setSerialTouched] = useState(false);
+
+  // Keep the field synced with the auto value while the user hasn't touched it
+  useEffect(() => {
+    if (!serialTouched) setJobSerialInput(String(autoSerial));
+  }, [autoSerial, serialTouched]);
+
+  const parsedSerial = Number.parseInt(jobSerialInput, 10);
+  const serialIsValidNumber = Number.isFinite(parsedSerial) && parsedSerial > 0;
+  const serialDuplicate = serialIsValidNumber && !isJobSerialAvailable(parsedSerial);
+  const serialError = !serialIsValidNumber
+    ? 'Enter a valid number'
+    : serialDuplicate
+      ? 'This job number already exists'
+      : '';
+  const previewJobNumber = serialIsValidNumber
+    ? formatDocumentNumber(jobWorkPrefix, parsedSerial)
+    : nextJobNumber;
 
   // ── Hydrate from sessionStorage ──────────────────────────────────────────
   const saved = loadDraft();
@@ -491,8 +515,11 @@ export function CreateJobWorkPage() {
   /** Remove every line item that belongs to a reference group, freeing the reference for reuse */
   const removeRefGroup = (refNum: string) =>
     setLineItems((prev) => prev.filter((li) => (li.refNumber ?? '(no reference)') !== refNum));
-  const updateLineItem = (idx: number, field: 'quantity' | 'rate' | 'weight', value: number) =>
-    setLineItems((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: value } : item)));
+  const updateLineItem = (idx: number, field: 'quantity' | 'rate' | 'weight', value: number) => {
+    // Coerce NaN (from a cleared number input) to 0 so totals never become NaN
+    const safeValue = Number.isFinite(value) ? value : 0;
+    setLineItems((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: safeValue } : item)));
+  };
 
   /** After adding item(s), if no more pending → clear ref and focus selector */
   const resetRefAfterAdd = (newPendingCount: number) => {
@@ -585,10 +612,18 @@ export function CreateJobWorkPage() {
 
   const handleSave = (mode: 'draft' | 'confirm') => {
     if (!vendorId || !expectedDate) return;
+    // Block save if the (possibly edited) job number is invalid or a duplicate
+    if (serialError) {
+      addToast(serialError, 'error');
+      return;
+    }
     const rawItems = buildItems();
     if (rawItems.length === 0) return;
 
     const jobReference = [...new Set(lineItems.map((li) => li.refNumber).filter(Boolean))].join(', ');
+
+    // Only pass a custom serial when the user edited it away from the auto value
+    const customSerial = serialTouched && serialIsValidNumber ? parsedSerial : undefined;
 
     const jobId = createJobWork({
       vendorId,
@@ -606,7 +641,10 @@ export function CreateJobWorkPage() {
         // on the 'confirm' path, so pre-setting it here would double-count.
         sentQuantity: 0,
       })),
-    });
+    }, customSerial);
+
+    // createJobWork returns null if the serial was taken (race / stale UI)
+    if (!jobId) return;
 
     if (mode === 'confirm') {
       const challanId = createDispatch({
@@ -651,19 +689,45 @@ export function CreateJobWorkPage() {
       </div>
 
       <div data-form ref={formRef}>
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <div className="xl:col-span-2 space-y-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="space-y-6">
 
             {/* ── Job Information ── */}
             <Card className="p-6">
               <h3 className="text-base font-semibold mb-4">Job Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Input label="Job Number" value={nextJobNumber} disabled tabIndex={-1} />
-                  {reusableJobNumber != null && (
+                  <label className="text-sm font-medium text-charcoal" htmlFor="job-serial">Job Number</label>
+                  <div className="mt-1 flex items-stretch rounded-lg border border-border overflow-hidden focus-within:ring-2 focus-within:ring-brand/20 focus-within:border-brand">
+                    <span className="inline-flex items-center px-3 bg-surface text-xs font-mono text-muted border-r border-border whitespace-nowrap">
+                      {jobWorkPrefix.replace(/#+/, '').replace(/Y{4}/, String(new Date().getFullYear()))}
+                    </span>
+                    <input
+                      id="job-serial"
+                      type="number"
+                      min={1}
+                      value={jobSerialInput}
+                      onChange={(e) => { setSerialTouched(true); setJobSerialInput(e.target.value); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          focusNextInForm(e.currentTarget, e.shiftKey);
+                        }
+                      }}
+                      className="flex-1 w-full px-3 py-2 text-sm text-charcoal focus:outline-none"
+                      aria-invalid={!!serialError}
+                    />
+                  </div>
+                  {serialError ? (
+                    <p className="mt-1 text-xs text-danger">{serialError}</p>
+                  ) : serialTouched ? (
+                    <p className="mt-1 text-xs text-muted">Will be saved as <span className="font-medium text-charcoal">{previewJobNumber}</span></p>
+                  ) : reusableJobNumber != null ? (
                     <p className="mt-1 text-xs text-green-700">
-                      Available number reused from a deleted job work.
+                      Reusing #{reusableJobNumber} — freed from a deleted job work. You can change it.
                     </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted">Auto-assigned. You can change it if needed.</p>
                   )}
                 </div>
                 <SearchableSelect
@@ -1092,9 +1156,9 @@ export function CreateJobWorkPage() {
                                 (li) => (li.refNumber ?? '(no reference)') === refNum,
                               );
                               return (
-                                <>
+                                <Fragment key={`grp-${refNum}`}>
                                   {/* Reference group header row */}
-                                  <tr key={`hdr-${refNum}`} className="bg-brand/5 border-b border-brand/10">
+                                  <tr className="bg-brand/5 border-b border-brand/10">
                                     <td colSpan={7} className="px-4 py-1.5">
                                       <div className="flex items-center gap-2">
                                         <Tag size={11} className="text-brand shrink-0" />
@@ -1122,7 +1186,7 @@ export function CreateJobWorkPage() {
                                     const cat    = categories.find((c) => c.id === prod?.categoryId);
                                     const amount = li.quantity * li.rate;
                                     return (
-                                      <tr key={globalIdx} className="border-b border-border last:border-0 hover:bg-surface/50">
+                                      <tr key={`${refNum}-${li.productId}-${li.variantId}-${gIdx}`} className="border-b border-border last:border-0 hover:bg-surface/50">
                                         <td className="px-4 py-2.5 text-muted text-xs pl-8">{globalIdx + 1}</td>
                                         <td className="px-4 py-2.5 text-muted">{cat?.name ?? '—'}</td>
                                         <td className="px-4 py-2.5 font-medium text-charcoal">{prod?.name ?? '—'}</td>
@@ -1160,7 +1224,7 @@ export function CreateJobWorkPage() {
                                       </tr>
                                     );
                                   })}
-                                </>
+                                </Fragment>
                               );
                             })}
                           </tbody>
@@ -1184,77 +1248,83 @@ export function CreateJobWorkPage() {
               </Card>
             </div>
           </div>
+        </div>
 
-          {/* ── Summary sidebar ── */}
-          <div>
-            <Card className="p-6 sticky top-6">
-              <h3 className="text-base font-semibold mb-4">Summary</h3>
+        {/* ── Bottom action bar (sticky) ── */}
+        <div className="max-w-5xl mx-auto mt-6 sticky bottom-0 z-10">
+          <Card className="p-4 shadow-lg border-brand/20">
+            {/* References used in this job */}
+            {usedInDraft.size > 0 && (
+              <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-border">
+                <span className="text-xs font-semibold text-muted uppercase">References:</span>
+                {[...usedInDraft].map((rn) => (
+                  <span key={rn} className="inline-flex items-center gap-1 text-xs font-medium text-brand bg-brand/5 border border-brand/20 rounded px-1.5 py-0.5">
+                    <Tag size={10} className="shrink-0" />
+                    {rn}
+                  </span>
+                ))}
+              </div>
+            )}
 
-              {/* References used */}
-              {usedInDraft.size > 0 && (
-                <div className="mb-4 space-y-1">
-                  <p className="text-xs font-semibold text-muted uppercase">References in this job</p>
-                  {[...usedInDraft].map((rn) => (
-                    <div key={rn} className="flex items-center gap-1.5 text-xs">
-                      <Tag size={11} className="text-brand shrink-0" />
-                      <span className="font-medium text-brand">{rn}</span>
-                    </div>
-                  ))}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+              {/* Compact totals */}
+              <div className="flex items-center gap-6 text-sm">
+                <div>
+                  <span className="text-muted">Items </span>
+                  <span className="font-semibold text-charcoal">{lineItems.length}</span>
                 </div>
-              )}
-
-              <div className="space-y-3 text-sm mb-6">
-                <div className="flex justify-between">
-                  <span className="text-muted">Total Items</span>
-                  <span className="font-medium">{lineItems.length}</span>
+                <div>
+                  <span className="text-muted">Quantity </span>
+                  <span className="font-semibold text-charcoal">{grandTotals.qty.toLocaleString('en-IN')} Pic</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted">Total Quantity</span>
-                  <span className="font-bold text-charcoal">{grandTotals.qty.toLocaleString('en-IN')} Pic</span>
-                </div>
-                <div className="flex justify-between border-t border-border pt-3">
-                  <span className="text-muted">Total Amount</span>
+                <div>
+                  <span className="text-muted">Total </span>
                   <span className="font-bold text-brand text-base">{formatCurrency(grandTotals.amount)}</span>
                 </div>
               </div>
 
-              {(!vendorId || !expectedDate) && (
-                <p className="text-xs text-orange-600 mb-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+              {/* Helper hint */}
+              {serialError ? (
+                <p className="text-xs text-danger bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 lg:ml-auto">
+                  Job number: {serialError}.
+                </p>
+              ) : (!vendorId || !expectedDate) ? (
+                <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-1.5 lg:ml-auto">
                   Fill in Vendor and Expected Date to save.
                 </p>
-              )}
-              {lineItems.length === 0 && (
-                <p className="text-xs text-muted mb-3 bg-surface border border-border rounded-lg px-3 py-2">
+              ) : lineItems.length === 0 ? (
+                <p className="text-xs text-muted bg-surface border border-border rounded-lg px-3 py-1.5 lg:ml-auto">
                   Select a reference and add products to the job.
                 </p>
-              )}
+              ) : null}
 
-              <div className="space-y-2">
+              {/* Actions */}
+              <div className="flex items-center gap-2 lg:ml-auto">
+                <Button type="button" variant="ghost"
+                  onClick={() => { clearDraft(); navigate('/job-works'); }}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => window.print()}>
+                  Print
+                </Button>
+                <Button type="button" variant="outline"
+                  onClick={() => handleSave('draft')}
+                  disabled={!vendorId || !expectedDate || lineItems.length === 0 || !!serialError}>
+                  Save as Draft
+                </Button>
                 <button
                   ref={confirmBtnRef}
                   type="button"
-                  className="w-full inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium bg-brand text-white hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium bg-brand text-white hover:bg-brand/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   onClick={() => handleSave('confirm')}
-                  disabled={!vendorId || !expectedDate || lineItems.length === 0}
+                  disabled={!vendorId || !expectedDate || lineItems.length === 0 || !!serialError}
                 >
                   Confirm &amp; Dispatch
                   <kbd className="ml-2 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</kbd>
                 </button>
-                <Button type="button" variant="outline" className="w-full"
-                  onClick={() => handleSave('draft')}
-                  disabled={!vendorId || !expectedDate || lineItems.length === 0}>
-                  Save as Draft
-                </Button>
-                <Button type="button" variant="ghost" className="w-full" onClick={() => window.print()}>
-                  Print
-                </Button>
-                <Button type="button" variant="ghost" className="w-full"
-                  onClick={() => { clearDraft(); navigate('/job-works'); }}>
-                  Cancel
-                </Button>
               </div>
-            </Card>
-          </div>
+            </div>
+          </Card>
         </div>
       </div>
 
