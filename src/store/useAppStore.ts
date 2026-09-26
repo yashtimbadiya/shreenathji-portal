@@ -137,6 +137,8 @@ interface AppState {
 
   createDispatch: (data: Omit<DispatchRecord, 'id' | 'challanNumber'>) => string;
   updateDispatch: (id: string, data: Partial<Pick<DispatchRecord, 'date' | 'vehicleNumber' | 'driver' | 'transport' | 'remarks'>>) => void;
+  /** Delete a challan/dispatch and revert the sentQuantity it added to the job. */
+  deleteDispatch: (id: string) => void;
   createReceipt: (data: Omit<ReceiptRecord, 'id'>) => void;
   loadLocalData: () => Promise<void>;
   recordPayment: (paymentId: string, amount: number) => void;
@@ -1005,6 +1007,44 @@ export const useAppStore = create<AppState>()(
         if (updated) void saveDispatch(updated);
         get().addActivity('JobWork', updated?.jobWorkId ?? '', 'Challan updated');
         get().addToast('Challan updated');
+        scheduleBackup();
+      },
+
+      deleteDispatch: (id) => {
+        const dispatch = get().dispatches.find((d) => d.id === id);
+        if (!dispatch) return;
+        const jobId = dispatch.jobWorkId;
+        const challanNumber = dispatch.challanNumber;
+
+        set((s) => {
+          // Revert the sentQuantity that this challan added to its job's items.
+          const jobWorks = s.jobWorks.map((j) => {
+            if (j.id !== jobId) return j;
+            const items = j.items.map((item) => {
+              const di = dispatch.items.find(
+                (d) =>
+                  (d.jobWorkItemId && d.jobWorkItemId === item.id) ||
+                  (!d.jobWorkItemId && d.variantId === item.variantId),
+              );
+              if (!di) return item;
+              return { ...item, sentQuantity: Math.max(0, item.sentQuantity - di.quantity) };
+            });
+            const updatedJob = { ...j, items };
+            return { ...updatedJob, status: computeJobStatus(updatedJob) };
+          });
+          return {
+            dispatches: s.dispatches.filter((d) => d.id !== id),
+            jobWorks,
+          };
+        });
+
+        // Persist: remove the challan, save the reverted job
+        void deleteDispatchRecord(id);
+        const updatedJob = get().jobWorks.find((j) => j.id === jobId);
+        if (updatedJob) void saveJobWork(updatedJob);
+
+        get().addActivity('JobWork', jobId, `Challan ${challanNumber} deleted`);
+        get().addToast(`Challan ${challanNumber} deleted`);
         scheduleBackup();
       },
 

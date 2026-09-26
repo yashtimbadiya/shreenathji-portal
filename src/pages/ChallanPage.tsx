@@ -1,6 +1,6 @@
 import { Download, Pencil, Printer, Share2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
 import { buildChallanPrintData, CHALLAN_PRINT_CSS, ChallanPrintPreview, printChallan, type PrintOrientation } from '../components/ui/ChallanPrint';
@@ -140,6 +140,8 @@ export function ChallanDetailPage() {
 export function EditChallanPage() {
   const { id }            = useParams<{ id: string }>();
   const navigate          = useNavigate();
+  const [searchParams]    = useSearchParams();
+  const returnTo          = searchParams.get('returnTo');
   const dispatches        = useAppStore((s) => s.dispatches);
   const jobWorks          = useAppStore((s) => s.jobWorks);
   const updateDispatch    = useAppStore((s) => s.updateDispatch);
@@ -170,8 +172,8 @@ export function EditChallanPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [canSave]);
 
-  // ESC → back to challan detail
-  useEscapeBack(() => navigate(dispatch ? `/challans/${dispatch.id}` : '/challans'));
+  // ESC → back to where we came from (job challans view or challan detail)
+  useEscapeBack(() => navigate(returnTo ?? (dispatch ? `/challans/${dispatch.id}` : '/challans')));
 
   if (!dispatch) {
     return (
@@ -192,6 +194,8 @@ export function EditChallanPage() {
       driver,
       remarks: remarks || undefined,
     });
+    // After editing, always land on the challan print-preview so the user can
+    // immediately review and print the updated challan.
     navigate(`/challans/${dispatch.id}`);
   };
 
@@ -305,7 +309,7 @@ export function EditChallanPage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => navigate(`/challans/${dispatch.id}`)}
+              onClick={() => navigate(returnTo ?? `/challans/${dispatch.id}`)}
             >
               Cancel
             </Button>

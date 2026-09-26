@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Pencil, Trash2 } from 'lucide-react';
+import { FileText, Pencil, Printer, Trash2 } from 'lucide-react';
 import { BackButton } from '../components/ui/BackButton';
 import { Button } from '../components/ui/Button';
 import { Breadcrumb, Card, KPICard, PageHeader } from '../components/ui/Card';
@@ -20,10 +20,12 @@ import { useEscapeBack } from '../hooks/useEscapeBack';
 import { sortByDateDesc } from '../lib/sorting';
 import { PriorityBadge } from '../components/ui/PriorityBadge';
 import { formatDocumentNumber, getDocumentSerial } from '../lib/documentNumbering';
+import { buildChallanPrintData, ChallanPrintPreview, printChallan, type PrintOrientation } from '../components/ui/ChallanPrint';
+import type { DispatchRecord } from '../types';
 
 const TIMELINE_STEPS = ['Job Created', 'Material Dispatched', 'Vendor Processing', 'Partial Receipt', 'QC', 'Completed'];
 
-const TABS = ['Overview', 'Items', 'Lifecycle', 'Payments', 'Activity'];
+const TABS = ['Overview', 'Items', 'Challans', 'Payments', 'Activity'];
 
 export function JobWorkDetailPage() {
   const { id } = useParams();
@@ -37,12 +39,17 @@ export function JobWorkDetailPage() {
   const payments = useAppStore((s) => s.payments);
   const vendors = useAppStore((s) => s.vendors);
   const products = useAppStore((s) => s.products);
+  const categories = useAppStore((s) => s.categories);
+  const settings = useAppStore((s) => s.settings);
   const addPayment = useAppStore((s) => s.addPayment);
   const deleteJobWork = useAppStore((s) => s.deleteJobWork);
+  const deleteDispatch = useAppStore((s) => s.deleteDispatch);
   const checkConstraints = useAppStore((s) => s.checkJobWorkDeleteConstraints);
-  const [activeTab, setActiveTab] = useState('Overview');
+  const [activeTab, setActiveTab] = useState('Challans');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteBlockReasons, setDeleteBlockReasons] = useState<string[]>([]);
+  const [challanOrientation, setChallanOrientation] = useState<PrintOrientation>('vertical');
+  const [challanToDelete, setChallanToDelete] = useState<DispatchRecord | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     paymentType: 'Advance' as 'Advance' | 'Running' | 'Final' | 'Balance',
     paid: '',
@@ -231,49 +238,93 @@ export function JobWorkDetailPage() {
         </Card>
       )}
 
-      {activeTab === 'Lifecycle' && (
-        <Card className="p-6 space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-lg bg-surface p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Dispatch / Challan</p>
-              {jobDispatches.length === 0 ? (
-                <p className="text-sm text-muted">No dispatch entry logged for this job yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {jobDispatches.map((d) => (
-                    <div key={d.id} className="flex items-center justify-between gap-3">
-                      <div>
-                        <Link to={`/challans/${d.id}`} className="font-medium text-brand">{d.challanNumber}</Link>
-                        <p className="text-xs text-muted">{formatDate(d.date)} — {d.vehicleNumber || 'Own Vehicle'}</p>
-                      </div>
-                      <span className="text-sm text-charcoal">{d.driver || '—'}</span>
+      {activeTab === 'Challans' && (
+        <div className="space-y-6">
+          {jobDispatches.length === 0 ? (
+            <Card className="p-8 text-center text-sm text-muted">
+              No challan has been generated for this job yet.
+              <div className="mt-3">
+                <Button variant="outline" onClick={() => navigate(`/dispatch?job=${job.id}`)}>
+                  Dispatch Material
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            jobDispatches.map((d) => {
+              const printData = buildChallanPrintData(d, job, vendor ?? null, products, categories, settings);
+              return (
+                <Card key={d.id} className="overflow-hidden">
+                  {/* Action bar for this challan */}
+                  <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-border bg-surface">
+                    <div className="flex items-center gap-2">
+                      <FileText size={15} className="text-brand" />
+                      <span className="font-semibold text-brand">{d.challanNumber}</span>
+                      <span className="text-xs text-muted">{formatDate(d.date)}</span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    <div className="ml-auto flex items-center gap-2">
+                      {/* Orientation toggle */}
+                      <div className="inline-flex items-center rounded-lg border border-border overflow-hidden" role="group" aria-label="Print orientation">
+                        <button
+                          type="button"
+                          onClick={() => setChallanOrientation('horizontal')}
+                          className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${challanOrientation === 'horizontal' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-surface'}`}
+                        >
+                          Horizontal
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setChallanOrientation('vertical')}
+                          className={`px-2.5 py-1.5 text-xs font-medium border-l border-border transition-colors ${challanOrientation === 'vertical' ? 'bg-brand text-white' : 'bg-white text-muted hover:bg-surface'}`}
+                        >
+                          Vertical
+                        </button>
+                      </div>
+                      <Button variant="outline" onClick={() => printChallan(printData, challanOrientation)}>
+                        <Printer size={14} /> Print A5
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => navigate(`/challans/${d.id}/edit?returnTo=${encodeURIComponent(`/job-works/${job.id}`)}`)}
+                      >
+                        <Pencil size={14} /> Edit
+                      </Button>
+                      <Button variant="danger" onClick={() => setChallanToDelete(d)}>
+                        <Trash2 size={14} /> Delete
+                      </Button>
+                    </div>
+                  </div>
 
-            <div className="rounded-lg bg-surface p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Receipts / QC</p>
-              {jobReceipts.length === 0 ? (
-                <p className="text-sm text-muted">No receipt has been recorded yet. QC will appear after material is returned.</p>
-              ) : (
-                <div className="space-y-2">
-                  {jobReceipts.map((r) => (
-                    <div key={r.id}>
-                      <p className="font-medium">{formatDate(r.date)}</p>
+                  {/* Inline print-preview of the challan */}
+                  <div className="bg-gray-100 p-4 overflow-x-auto flex justify-center">
+                    <div className="shadow-lg ring-1 ring-black/10 bg-white">
+                      <ChallanPrintPreview data={printData} orientation={challanOrientation} />
+                    </div>
+                  </div>
+                </Card>
+              );
+            })
+          )}
+
+          {/* Receipts summary below the challans */}
+          <Card className="p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">Receipts / QC</p>
+            {jobReceipts.length === 0 ? (
+              <p className="text-sm text-muted">No receipt has been recorded yet. QC will appear after material is returned.</p>
+            ) : (
+              <div className="space-y-2">
+                {jobReceipts.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between gap-3">
+                    <div>
+                      <Link to={`/receive/history/${r.id}`} className="font-medium text-brand">{r.receiptNumber ?? formatDate(r.date)}</Link>
                       <p className="text-xs text-muted">Received by {r.receivedBy} | VC: {r.vendorChallanNumber ?? '—'}</p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border p-4 text-sm text-muted">
-            <span className="font-medium text-charcoal">Lifecycle summary:</span> this job already advances through dispatch and receipt stages as part of one job-work cycle, so the progress is tracked in a single timeline rather than separate sections.
-          </div>
-        </Card>
+                    <span className="text-sm text-muted">{formatDate(r.date)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
       {activeTab === 'Activity' && (
@@ -531,6 +582,24 @@ export function JobWorkDetailPage() {
         title="Cannot Delete Job Work"
         entityName={job.jobNumber}
         reasons={deleteBlockReasons}
+      />
+
+      {/* Delete challan confirmation */}
+      <ConfirmDialog
+        open={challanToDelete !== null}
+        onClose={() => setChallanToDelete(null)}
+        onConfirm={() => {
+          if (challanToDelete) deleteDispatch(challanToDelete.id);
+          setChallanToDelete(null);
+        }}
+        title="Delete Challan"
+        message={
+          challanToDelete
+            ? `Delete challan ${challanToDelete.challanNumber}? The dispatched quantities it recorded will be reverted on this job. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        danger
       />
     </div>
   );
