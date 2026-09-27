@@ -422,16 +422,19 @@ export function printChallan(
   <meta charset="UTF-8"/>
   <title>Challan ${esc(challanNumber)}</title>
   <style>
-    /* ── Page geometry ───────────────────────────────────────────────
-       A5 = 148 × 210 mm (portrait) / 210 × 148 mm (landscape).
-       Let @page own the paper size AND the margin. The content box then
-       fills 100% of the *printable* area the browser hands us — we do NOT
-       hard-code a mm width, because printer drivers add their own
-       unprintable margin and a fixed width would overflow (clipping the
-       right edge and leaving a gap on the left). */
+    /* ── Page geometry (robust A5 — no clipping, no left gap) ─────────
+       KEY INSIGHT: the "half prints / right side cut / left gap" bug is a
+       DOUBLE-MARGIN problem. If @page has a margin AND the content also has
+       width/padding, the printer driver's own unprintable margin stacks on
+       top and pushes content off the right edge.
+
+       Fix: @page owns the paper size with ZERO margin. The .page element is
+       sized to the EXACT full A5 sheet and provides the margin itself via
+       internal padding. One margin, defined by us — the driver has nothing
+       to add on top, so nothing is clipped and there is no stray left gap. */
     ${orientation === 'vertical'
-      ? '@page { size: A5 portrait; margin: 6mm; }'
-      : '@page { size: A5 landscape; margin: 6mm; }'}
+      ? '@page { size: 148mm 210mm; margin: 0; }'
+      : '@page { size: 210mm 148mm; margin: 0; }'}
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -444,38 +447,34 @@ export function printChallan(
       print-color-adjust: exact;
     }
 
-    /* Fill the printable width; never exceed it. Flex column so the
-       signature block can sit at the bottom via .spacer. */
+    /* The page = the whole A5 sheet. Internal padding IS the print margin. */
     .page {
-      width: 100%;
-      max-width: 100%;
+      width:  ${orientation === 'vertical' ? '148mm' : '210mm'};
+      min-height: ${orientation === 'vertical' ? '210mm' : '148mm'};
+      padding: 7mm;
+      margin: 0 auto;
       display: flex;
       flex-direction: column;
       font-size: ${orientation === 'vertical' ? '9.2pt' : '9pt'};
+      background: #fff;
+      overflow: hidden;
     }
-    /* On screen, mimic an A5 sheet so the preview matches the print. */
+    /* On screen, show it as a floating sheet. */
     @media screen {
       body { background: #f3f4f6; padding: 16px; }
-      .page {
-        width:  ${orientation === 'vertical' ? '148mm' : '210mm'};
-        min-height: ${orientation === 'vertical' ? '210mm' : '148mm'};
-        margin: 0 auto;
-        padding: 6mm;
-        background: #fff;
-        box-shadow: 0 1px 8px rgba(0,0,0,.15);
-      }
+      .page { box-shadow: 0 1px 8px rgba(0,0,0,.15); }
     }
-    /* On paper the @page margin handles spacing; screen height must not
-       clamp print output, so let it grow naturally when printing. */
+    /* In print, the sheet fills exactly one page — no shadow, no clamp. */
     @media print {
-      .page { min-height: auto; }
+      html, body { width: auto; }
+      .page { box-shadow: none; margin: 0; }
     }
     /* Push the signature block to the bottom of the page */
     .spacer { flex: 1 1 auto; min-height: 8px; }
-    /* Keep logical blocks together; allow long item tables to flow if needed */
+    /* Keep logical blocks together */
     .sigs, .header, .info-grid { page-break-inside: avoid; }
     tr { page-break-inside: avoid; }
-    /* Wide item tables must shrink to fit, not overflow the page width */
+    /* Tables must fit the content width, never overflow it */
     table { width: 100%; max-width: 100%; table-layout: fixed; }
     td, th { overflow: hidden; text-overflow: ellipsis; word-break: break-word; }
 

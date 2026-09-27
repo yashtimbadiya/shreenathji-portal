@@ -179,15 +179,16 @@ export function printPaymentReceipt(data: PaymentReceiptData): void {
   <meta charset="UTF-8"/>
   <title>Payment Receipt ${esc(receiptNumber)}</title>
   <style>
-    /* A5 portrait. @page owns the paper size + margin; the content box fills
-       the printable width (no fixed mm width, which would overflow and clip). */
-    @page { size: A5 portrait; margin: 8mm; }
+    /* A5 portrait. @page = zero margin so the driver adds nothing on top; the
+       .page fills the whole sheet and supplies the margin via internal padding.
+       This avoids the double-margin that clips the right edge / leaves a gap. */
+    @page { size: 148mm 210mm; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 100%; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.5pt; color: #111827; background: #fff;
            -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .page {
-      width: 100%; max-width: 100%;
-      display: flex; flex-direction: column;
+      width: 148mm; min-height: 210mm; padding: 9mm; margin: 0 auto;
+      display: flex; flex-direction: column; background: #fff; overflow: hidden;
     }
     .spacer { flex: 1 1 auto; }
     table.amt, .party, .header, .sigs { page-break-inside: avoid; }
@@ -195,9 +196,9 @@ export function printPaymentReceipt(data: PaymentReceiptData): void {
     td, th { overflow: hidden; text-overflow: ellipsis; word-break: break-word; }
     @media screen {
       body { background: #f3f4f6; padding: 16px; }
-      .page { width: 148mm; min-height: 210mm; margin: 0 auto; padding: 8mm; background: #fff; box-shadow: 0 1px 8px rgba(0,0,0,.15); }
+      .page { box-shadow: 0 1px 8px rgba(0,0,0,.15); }
     }
-    @media print { .page { min-height: auto; } }
+    @media print { html, body { width: auto; } .page { box-shadow: none; margin: 0; } }
     .header { display: flex; justify-content: space-between; align-items: flex-start;
               border-bottom: 2.5px solid #2563eb; padding-bottom: 8px; margin-bottom: 12px; }
     .company-name { font-size: 14pt; font-weight: 800; color: #2563eb; }
