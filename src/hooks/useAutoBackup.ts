@@ -44,31 +44,48 @@ export function useAutoBackup() {
     void runAutoBackup();
   }, []);
 
-  // ── ON CLOSE / UNLOAD: one final folder write (no download fallback) ───────
+  // ── ON CLOSE: one final folder write (never on minimize / tab switch) ──────
+  //
+  // Browser reality check: a web app cannot *block* on close like a native app
+  // (Miracle) can, and async File System Access writes may be cut short during
+  // unload. So we do two things:
+  //   1. Fire the folder write on the true "leaving" signals (pagehide /
+  //      beforeunload) — Chrome/Edge usually keep the page alive long enough.
+  //   2. Rely on the debounced after-every-change backup (see scheduleBackup)
+  //      as the guarantee: the folder already holds a backup from seconds ago,
+  //      so nothing is lost even if the close write is interrupted.
+  //
+  // We deliberately do NOT back up on `visibilitychange`/blur, because those
+  // fire on minimize and tab switching — which the user does not want.
   useEffect(() => {
-    const attemptBackupOnClose = () => {
+    const writeNow = () => {
       if (closingRef.current) return;
       closingRef.current = true;
-
-      // We're writing now — cancel any pending debounced write.
       cancelScheduledBackup();
-
-      // Only the File System Access path is safe on unload. A download here
-      // would fire on every reload/navigation, so we deliberately skip it.
-      if (!supportsFileSystemAccess) return;
-
-      // Fire-and-forget: unload handlers cannot await. Chrome/Edge keep the
-      // page alive briefly, which is enough for the folder write to flush.
-      void backupIfPermitted();
+      // Only folder writes are safe on unload; a download would spam on reload.
+      if (supportsFileSystemAccess) void backupIfPermitted();
+      // Re-arm shortly after: if the page actually survived (e.g. the user
+      // cancelled a reload), allow a future close to back up again.
+      setTimeout(() => { closingRef.current = false; }, 2000);
     };
 
-    // pagehide fires on close, navigation, and reload — but not on minimize
-    // or ordinary tab switching, which is exactly what we want.
-    const onPageHide = () => attemptBackupOnClose();
+    // pagehide: fires on close, reload, and navigation away — NOT on minimize
+    // or tab switch. This is the correct "window is closing" signal.
+    const onPageHide = (e: PageTransitionEvent) => {
+      // e.persisted === true means the page is going into the bfcache (may come
+      // back); still safe to write a backup.
+      void e;
+      writeNow();
+    };
+    // beforeunload: extra coverage for hard closes where pagehide is skipped.
+    const onBeforeUnload = () => writeNow();
+
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
 
     return () => {
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
     };
   }, []);
 }

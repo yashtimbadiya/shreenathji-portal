@@ -9,6 +9,7 @@ import { Card, CardHeader, PageHeader } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
 import { useAppStore } from '../store/useAppStore';
 import { exportToExcel, importFromExcel } from '../api/excelBackup';
+import { downloadSnapshot, restoreSnapshot } from '../api/fullBackup';
 import {
   supportsFileSystemAccess,
   loadDirectoryHandle,
@@ -49,12 +50,54 @@ export function SettingsPage() {
   const [formState, setFormState] = useState(settings);
   const [isDirty,   setIsDirty]   = useState(false);
 
-  // ── Export / Import ─────────────────────────────────────────────────────────
+  // ── Export / Import (Excel — human-readable) ─────────────────────────────────
   const [exportStatus,  setExportStatus]  = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const [importStatus,  setImportStatus]  = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const [importMessage, setImportMessage] = useState('');
   const [importCounts,  setImportCounts]  = useState<Record<string, number> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Full snapshot (portable, restore-safe — for moving to another PC) ─────────
+  const [snapExportStatus, setSnapExportStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+  const [snapExportMsg,    setSnapExportMsg]    = useState('');
+  const [snapImportStatus, setSnapImportStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
+  const [snapImportMsg,    setSnapImportMsg]    = useState('');
+  const [snapImportCounts, setSnapImportCounts] = useState<Record<string, number> | null>(null);
+  const snapFileRef = useRef<HTMLInputElement>(null);
+
+  const handleFullExport = async () => {
+    setSnapExportStatus('working'); setSnapExportMsg('');
+    try {
+      const { filename, records } = await downloadSnapshot();
+      setSnapExportStatus('done');
+      setSnapExportMsg(`Saved ${filename} — ${records.toLocaleString('en-IN')} records.`);
+      setTimeout(() => { setSnapExportStatus('idle'); setSnapExportMsg(''); }, 6000);
+    } catch (err) {
+      console.error(err);
+      setSnapExportStatus('error');
+      setSnapExportMsg('Export failed — try again.');
+      setTimeout(() => { setSnapExportStatus('idle'); setSnapExportMsg(''); }, 6000);
+    }
+  };
+
+  const handleFullImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setSnapImportStatus('working'); setSnapImportMsg(''); setSnapImportCounts(null);
+
+    const result = await restoreSnapshot(file);
+    setSnapImportMsg(result.message);
+    setSnapImportStatus(result.ok ? 'done' : 'error');
+
+    if (result.ok) {
+      setSnapImportCounts(result.counts ?? null);
+      // Hard reload so the store + all pages re-hydrate from the restored data.
+      setTimeout(() => window.location.reload(), 1500);
+    } else {
+      setTimeout(() => { setSnapImportStatus('idle'); setSnapImportMsg(''); }, 7000);
+    }
+  };
 
   // ── Auto Backup state ───────────────────────────────────────────────────────
   const [folderName,     setFolderName]     = useState<string | null>(null);
@@ -414,16 +457,145 @@ export function SettingsPage() {
           </div>
         </Card>
 
-        {/* ── Backup & Restore ─────────────────────────────────────────────── */}
+        {/* ── Full Backup (portable, restore-safe) ─────────────────────────── */}
+        <Card className="p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <HardDrive size={18} className="text-brand" />
+            <h3 className="text-base font-semibold">Full Backup &amp; Restore (move to another PC)</h3>
+          </div>
+          <p className="text-xs text-muted mb-5">
+            Saves <strong>everything</strong> — job works, challans, receipts, payments, vendors, products,
+            references, shared variants, activity history, company settings, and document numbers — into one
+            <code className="bg-surface px-1 rounded mx-1">.snjbackup</code> file. Copy it to another computer and
+            use <strong>Restore</strong> there to reproduce this system exactly. This is the recommended way to
+            transfer or safeguard your data.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Full export */}
+            <div className="rounded-lg border border-border p-4 flex flex-col">
+              <div className="flex items-start gap-3 mb-4 flex-1">
+                <div className="rounded-full bg-brand/10 p-2 shrink-0">
+                  <Download size={16} className="text-brand" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Export Full Backup</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Downloads a complete <code className="bg-surface px-1 rounded">.snjbackup</code> snapshot.
+                    Nothing is dropped — safe for moving between computers.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleFullExport}
+                disabled={snapExportStatus === 'working'}
+                className={`w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
+                  ${snapExportStatus === 'working'
+                    ? 'border-border text-muted cursor-not-allowed'
+                    : snapExportStatus === 'done'
+                    ? 'border-green-300 bg-green-50 text-green-700'
+                    : snapExportStatus === 'error'
+                    ? 'border-red-300 bg-red-50 text-red-600'
+                    : 'border-brand/40 text-brand hover:bg-brand/5'
+                  }`}
+              >
+                {snapExportStatus === 'working' ? (
+                  <><RefreshCw size={14} className="animate-spin" /> Building…</>
+                ) : snapExportStatus === 'done' ? (
+                  <><CheckCircle2 size={15} /> Downloaded</>
+                ) : snapExportStatus === 'error' ? (
+                  <><AlertTriangle size={15} /> Failed — try again</>
+                ) : (
+                  <><HardDrive size={15} /> Export Full Backup (.snjbackup)</>
+                )}
+              </button>
+              {snapExportMsg && (
+                <p className={`mt-2 text-xs text-center ${snapExportStatus === 'error' ? 'text-red-600' : 'text-green-600'}`}>
+                  {snapExportMsg}
+                </p>
+              )}
+            </div>
+
+            {/* Full restore */}
+            <div className="rounded-lg border border-border p-4 flex flex-col">
+              <div className="flex items-start gap-3 mb-4 flex-1">
+                <div className="rounded-full bg-amber-50 p-2 shrink-0">
+                  <Upload size={16} className="text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Restore Full Backup</p>
+                  <p className="text-xs text-muted mt-0.5">
+                    Pick a <code className="bg-surface px-1 rounded">.snjbackup</code> file.
+                    <strong className="text-amber-700"> This replaces all current data</strong> with the
+                    backup, then reloads. Export first if unsure.
+                  </p>
+                </div>
+              </div>
+              <input
+                ref={snapFileRef}
+                type="file"
+                accept=".snjbackup,.json,application/json"
+                className="hidden"
+                onChange={handleFullImportFile}
+              />
+              <button
+                type="button"
+                onClick={() => snapFileRef.current?.click()}
+                disabled={snapImportStatus === 'working' || snapImportStatus === 'done'}
+                className={`w-full flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors
+                  ${snapImportStatus === 'working'
+                    ? 'border-border text-muted cursor-not-allowed'
+                    : snapImportStatus === 'done'
+                    ? 'border-green-300 bg-green-50 text-green-700 cursor-not-allowed'
+                    : snapImportStatus === 'error'
+                    ? 'border-red-300 bg-red-50 text-red-600'
+                    : 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                  }`}
+              >
+                {snapImportStatus === 'working' ? (
+                  <><RefreshCw size={14} className="animate-spin" /> Restoring…</>
+                ) : snapImportStatus === 'done' ? (
+                  <><CheckCircle2 size={15} /> Restored — reloading…</>
+                ) : snapImportStatus === 'error' ? (
+                  <><AlertTriangle size={15} /> Restore failed</>
+                ) : (
+                  <><Upload size={15} /> Restore Full Backup</>
+                )}
+              </button>
+              {snapImportMsg && (
+                <p className={`mt-2 flex items-center gap-1.5 text-xs ${snapImportStatus === 'done' ? 'text-green-600' : 'text-red-600'}`}>
+                  {snapImportStatus === 'done' ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                  {snapImportMsg}
+                </p>
+              )}
+              {snapImportCounts && (
+                <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-3">
+                  <p className="text-xs font-semibold text-green-700 mb-2">Restored records:</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                    {Object.entries(snapImportCounts).map(([label, count]) => (
+                      <div key={label} className="flex justify-between text-xs text-green-700">
+                        <span>{label}</span>
+                        <span className="font-semibold">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* ── Backup & Restore (Excel — human-readable) ─────────────────────── */}
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-1">
             <FileSpreadsheet size={18} className="text-green-600" />
-            <h3 className="text-base font-semibold">Manual Export &amp; Restore</h3>
+            <h3 className="text-base font-semibold">Excel Export (view / print)</h3>
           </div>
           <p className="text-xs text-muted mb-5">
-            Export a full backup as an Excel workbook you can open in Excel/Google Sheets.
-            To restore, import any previously exported <code className="bg-surface px-1 rounded">.xlsx</code> file —
-            records are upserted (matched by ID) and the page reloads automatically.
+            Export an Excel workbook you can open in Excel/Google Sheets to read or print your data.
+            You can also restore from a previously exported <code className="bg-surface px-1 rounded">.xlsx</code> —
+            but for moving between computers, prefer the <strong>Full Backup</strong> above (it never drops data).
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
