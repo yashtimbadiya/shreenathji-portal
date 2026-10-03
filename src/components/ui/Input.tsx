@@ -276,15 +276,38 @@ export function SearchableSelect({
     item?.scrollIntoView({ block: 'nearest' });
   }, [highlighted]);
 
+  // ── Auto-open on focus (Tab-in or programmatic focus) ──
+  const onTriggerFocus = useCallback(() => {
+    if (disabled || open) return;
+    openDropdown();
+  }, [disabled, open, openDropdown]);
+
   // ── Keyboard on TRIGGER button (dropdown closed) ──
   const onTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
     if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      openDropdown();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!open) openDropdown();
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
-      openDropdown();
+      if (!open) openDropdown();
+      return;
+    }
+    // Printable character typed on the trigger while closed → open + pre-seed query
+    if (!open && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setQuery(e.key);
+      setHighlighted(0);
+      setOpen(true);
+      setTimeout(() => {
+        if (searchRef.current) {
+          searchRef.current.focus();
+          // Place cursor at end of the pre-seeded character
+          searchRef.current.setSelectionRange(1, 1);
+        }
+      }, 10);
     }
     // Tab / other keys: let browser handle naturally
   };
@@ -330,6 +353,7 @@ export function SearchableSelect({
         data-trigger          // ← used by focusNextInForm
         disabled={disabled}
         tabIndex={tabIndex}
+        onFocus={onTriggerFocus}
         onClick={() => (open ? closeDropdown(false) : openDropdown())}
         onKeyDown={onTriggerKeyDown}
         aria-haspopup="listbox"
@@ -580,6 +604,19 @@ export function SearchableMultiSelect({
       e.preventDefault();
       openDropdown();
     }
+    // Printable character → open + pre-seed query
+    if (!open && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setQuery(e.key);
+      setHighlighted(0);
+      setOpen(true);
+      setTimeout(() => {
+        if (searchRef.current) {
+          searchRef.current.focus();
+          searchRef.current.setSelectionRange(1, 1);
+        }
+      }, 10);
+    }
   };
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -617,6 +654,7 @@ export function SearchableMultiSelect({
         data-trigger
         disabled={disabled}
         tabIndex={tabIndex}
+        onFocus={() => { if (!disabled && !open) openDropdown(); }}
         onClick={() => (open ? closeDropdown(false) : openDropdown())}
         onKeyDown={onTriggerKeyDown}
         aria-haspopup="listbox"

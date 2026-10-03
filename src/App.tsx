@@ -17,6 +17,11 @@ import { ReportsPage } from './pages/ReportsPage';
 import { PaymentsPage } from './pages/PaymentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ReferencesPage, AddReferencePage, EditReferencePage, ViewReferencePage } from './pages/ReferencePage';
+import { ProductionRegisterPage } from './pages/ProductionRegisterPage';
+import { ProductMasterPage, AddProductMasterPage, EditProductMasterPage } from './pages/ProductMasterPage';
+import { AddChallanPage, EditChallanRegisterPage } from './pages/ChallanFormPage';
+import { ChallanSlipPage } from './pages/ChallanSlipPage';
+import { RateCardPage } from './pages/RateCardPage';
 import { SharedVariantsPage } from './pages/SharedVariantsPage';
 
 export default function App() {
@@ -47,6 +52,14 @@ export default function App() {
         <Route path="job-works/:id" element={<JobWorkDetailPage />} />
         <Route path="job-works/:id/edit" element={<EditJobWorkPage />} />
         <Route path="challans" element={<ChallansPage />} />
+        <Route path="production" element={<ProductionRegisterPage />} />
+        <Route path="production/master" element={<ProductMasterPage />} />
+        <Route path="production/master/new" element={<AddProductMasterPage />} />
+        <Route path="production/master/:id/edit" element={<EditProductMasterPage />} />
+        <Route path="production/rate-card" element={<RateCardPage />} />
+        <Route path="production/new" element={<AddChallanPage />} />
+        <Route path="production/:id/edit" element={<EditChallanRegisterPage />} />
+        <Route path="production/:id/slip" element={<ChallanSlipPage />} />
         <Route path="challans/:id" element={<ChallanDetailPage />} />
         <Route path="challans/:id/edit" element={<EditChallanPage />} />
         <Route path="payments" element={<PaymentsPage />} />

@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type {
   ActivityLog,
   Category,
+  Challan,
   DispatchRecord,
   JobWork,
   Payment,
@@ -23,6 +24,7 @@ export class PortalLocalDb extends Dexie {
   activityLogs!: Table<ActivityLog, string>;
   references!: Table<ReferenceRecord, string>;
   sharedVariants!: Table<SharedVariant, string>;
+  challans!: Table<Challan, string>;
 
   constructor() {
     super('shreenathji-portal-local-db');
@@ -58,6 +60,19 @@ export class PortalLocalDb extends Dexie {
       activityLogs: 'id',
       references: 'id, referenceNumber',
       sharedVariants: 'id, name',
+    });
+    this.version(5).stores({
+      vendors: 'id',
+      categories: 'id',
+      products: 'id',
+      jobWorks: 'id',
+      receipts: 'id',
+      dispatches: 'id',
+      payments: 'id',
+      activityLogs: 'id',
+      references: 'id, referenceNumber',
+      sharedVariants: 'id, name',
+      challans: 'id, challanNumber, productId, vendorId',
     });
   }
 }
@@ -190,6 +205,22 @@ export async function saveSharedVariant(sv: SharedVariant): Promise<void> {
 
 export async function deleteSharedVariantRecord(id: string): Promise<void> {
   await portalDb.sharedVariants.delete(id);
+}
+
+export async function fetchChallans(): Promise<Challan[]> {
+  return portalDb.challans.toArray();
+}
+
+export async function saveChallan(challan: Challan): Promise<void> {
+  await portalDb.challans.put(challan);
+}
+
+export async function saveChallans(challans: Challan[]): Promise<void> {
+  await portalDb.challans.bulkPut(challans);
+}
+
+export async function deleteChallanRecord(id: string): Promise<void> {
+  await portalDb.challans.delete(id);
 }
 
 export async function deleteJobWorkRecord(id: string): Promise<void> {

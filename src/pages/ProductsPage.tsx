@@ -1,4 +1,4 @@
-import { Check, Link2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { Check, Link2, Pencil, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
@@ -21,6 +21,7 @@ export function ProductsPage() {
   const categories = useAppStore((s) => s.categories);
   const deleteProduct = useAppStore((s) => s.deleteProduct);
   const checkConstraints = useAppStore((s) => s.checkProductDeleteConstraints);
+  const importProductMaster = useAppStore((s) => s.importProductMaster);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -28,6 +29,17 @@ export function ProductsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [blockedTarget, setBlockedTarget] = useState<{ name: string; reasons: string[] } | null>(null);
+  const masterFileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleMasterFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setImporting(true);
+    await importProductMaster(file);
+    setImporting(false);
+  };
 
   // N → navigate to Add Subproduct page
   useNewItemShortcut(() => navigate('/products/new'));
@@ -47,7 +59,26 @@ export function ProductsPage() {
       <PageHeader
         title="Subproducts"
         subtitle={`${filtered.length} subproducts`}
-        action={<Link to="/products/new"><Button><Plus size={16} /> Add Subproduct</Button></Link>}
+        action={
+          <div className="flex items-center gap-2">
+            <input
+              ref={masterFileRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={handleMasterFile}
+            />
+            <Button
+              variant="outline"
+              disabled={importing}
+              onClick={() => masterFileRef.current?.click()}
+              title="Import the product-master sheet (.xlsx)"
+            >
+              <Upload size={16} /> {importing ? 'Importing…' : 'Import Master'}
+            </Button>
+            <Link to="/products/new"><Button><Plus size={16} /> Add Subproduct</Button></Link>
+          </div>
+        }
       />
 
       <Card className="p-4 mb-4">

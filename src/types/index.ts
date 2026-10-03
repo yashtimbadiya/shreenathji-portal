@@ -34,6 +34,32 @@ export interface Settings {
   invoicePrefix: string;
   /** Vendor payment receipt prefix, e.g. PR-YYYY-##### */
   paymentReceiptPrefix: string;
+  /** Optional production rate card (per-meter by pick range + per-kg rates) */
+  rateCard?: RateCard;
+}
+
+/** One row of the per-meter rate card, e.g. LB / maharani / JQ */
+export interface RateCardMeterRow {
+  /** Type label, e.g. "LB", "maharani", "JQ" */
+  type: string;
+  /** Rate for picks 1–70 */
+  lowPickRate?: number;
+  /** Rate for picks 71–100 */
+  highPickRate?: number;
+}
+
+/** One row of the per-kg rate card, e.g. TONY PATTI */
+export interface RateCardKgRow {
+  type: string;
+  rate?: number;
+}
+
+/** Production rate card (tab 3 of the workbook) */
+export interface RateCard {
+  /** Pick threshold separating low/high columns (default 70) */
+  lowPickMax: number;
+  meterRates: RateCardMeterRow[];
+  kgRates: RateCardKgRow[];
 }
 
 export interface Category {
@@ -76,6 +102,35 @@ export interface ProductVariant {
   sharedVariantId?: string;
 }
 
+/**
+ * Textile manufacturing spec for a product, sourced from the production
+ * "product master" sheet. All optional so existing products stay valid.
+ */
+export interface ProductSpec {
+  /** Design number, e.g. "67", "3R" */
+  designNo?: string;
+  /** Folder code, e.g. "LB-67-46-320" */
+  folderNo?: string;
+  /** Colour combination, e.g. "MARUN + CHEMPIYEN" */
+  colour?: string;
+  /** Geping / gauge as a number, e.g. 1.25 (parsed from "GEPING -1.25") */
+  geping?: number;
+  /** Meters per roll, e.g. 9.20 */
+  meterPerRoll?: number;
+  /** Machine patti, e.g. 30 */
+  machinePatti?: number;
+  /** Pick, e.g. 46 */
+  pick?: number;
+  /** Rate per meter, e.g. 1.75 */
+  ratePerMtr?: number;
+  /** Cut mark code, e.g. "55-SNF-3RR - 320 ( I I I )" */
+  cutMark?: string;
+  /** MIR / mirical name code, e.g. "2- [0.50 MII ]MR-300/1.25" */
+  mirName?: string;
+  /** Free-text setup note (often Hindi), e.g. "290 तिकड़ी सेट करना हे" */
+  tikdiNote?: string;
+}
+
 export interface Product {
   id: string;
   categoryId: string;
@@ -86,6 +141,8 @@ export interface Product {
   rate?: number;
   status: 'Active' | 'Disabled';
   variants: ProductVariant[];
+  /** Optional textile manufacturing spec (from product master import) */
+  spec?: ProductSpec;
 }
 
 export interface ReferenceItem {
@@ -242,4 +299,44 @@ export interface Toast {
   id: string;
   message: string;
   type: 'success' | 'error' | 'info';
+}
+
+/** One SIZE / ROUND pair on a challan (sizes are free-text: "S", "XL", "44", "3XL") */
+export interface ChallanSizeLine {
+  size: string;
+  round: number;
+}
+
+/**
+ * A challan / production dispatch record, sourced from the challan register
+ * sheet. Self-contained (not tied to a JobWork) — mirrors the source data 1:1.
+ */
+export interface Challan {
+  id: string;
+  /** Challan number as text to preserve leading formatting, e.g. "2111" */
+  challanNumber: string;
+  /** ISO date (YYYY-MM-DD) */
+  date: string;
+  /** Raw product name from the sheet */
+  productName: string;
+  /** Resolved link to the Product master when the name matches; else undefined */
+  productId?: string;
+  designNo: string;
+  pick: number;
+  folderNo: string;
+  /** Raw party name from the sheet, e.g. "KOTHARI", "EXTRA" */
+  partyName: string;
+  /** Resolved Vendor link for real (non-internal) parties */
+  vendorId?: string;
+  machinePatti: number;
+  /** Meters per piece */
+  mtrPerPic: number;
+  /** SIZE/ROUND grid, empty pairs dropped */
+  lines: ChallanSizeLine[];
+  /** TOTAL PIC from the sheet (kept as-is, not recomputed) */
+  totalPieces: number;
+  /** TOTAL MTR from the sheet */
+  totalMeters: number;
+  /** How this record entered the system */
+  source?: 'import' | 'manual';
 }

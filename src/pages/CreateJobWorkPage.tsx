@@ -40,13 +40,18 @@ interface DraftState {
 }
 
 /**
- * Stable per-item key that prevents collision when two items in the same
- * reference share the same productId but differ by variantId or position.
+ * Stable per-item key for the current reference's rows.
  *
- * Format: "<productId>::<variantId|idx>"
+ * A reference row is uniquely identified by its POSITION in the reference —
+ * nothing else. Keying on product/variant caused collisions: two rows with the
+ * same subproduct+variant (or the same auto-resolved variant) produced the same
+ * key, so their quantities overwrote each other. The index is invariant while a
+ * reference is loaded, so it is the correct, collision-proof key.
+ *
+ * productId/variantId are accepted for call-site compatibility but ignored.
  */
-function makeItemKey(productId: string, variantId: string | undefined, idx: number): string {
-  return `${productId}::${variantId ?? idx}`;
+function makeItemKey(_productId: string, _variantId: string | undefined, idx: number): string {
+  return `row::${idx}`;
 }
 
 function loadDraft(): DraftState | null {
@@ -478,10 +483,9 @@ export function CreateJobWorkPage() {
     () =>
       refItems
         .map((item, idx) => {
-          const resolvedVariant = draftVariants[makeItemKey(item.productId, item.variantId, idx)]
-            ?? item.variantId
-            ?? '';
-          const key = makeItemKey(item.productId, resolvedVariant || item.variantId, idx);
+          // Key is index-only, so it is identical no matter the variant.
+          const key = makeItemKey(item.productId, item.variantId, idx);
+          const resolvedVariant = draftVariants[key] ?? item.variantId ?? '';
           return { ...item, _key: key, _idx: idx, _resolvedVariant: resolvedVariant };
         })
         .filter((item) => item._key in draftQtys),
@@ -543,7 +547,7 @@ export function CreateJobWorkPage() {
 
   /**
    * Add a single pending item to the job by its itemKey.
-   * itemKey format: "<productId>::<resolvedVariantId|idx>"
+   * itemKey format: "row::<idx>" — unique per reference row.
    */
   const addRefItemToJob = (itemKey: string, productId: string, resolvedVariantId: string) => {
     const qty    = Number(draftQtys[itemKey])    || 0;
@@ -915,36 +919,11 @@ export function CreateJobWorkPage() {
                         const amount = (Number(qty) || 0) * (Number(rate) || 0);
                         const hasQty = Number(qty) > 0;
 
-                        // When variant changes we need to update the draft key.
-                        // Because key encodes the variant, we rebuild key on variant toggle.
+                        // The draft key is index-based and stable, so changing
+                        // the variant just updates the stored variant at that key
+                        // — qty/rate/weight stay put under the same key.
                         const handleVariantChange = (newVariantId: string) => {
-                          const oldKey = item._key;
-                          const newKey = makeItemKey(item.productId, newVariantId, item._idx);
-                          if (oldKey === newKey) return;
-                          setDraftVariants((prev) => {
-                            const next = { ...prev };
-                            delete next[oldKey];
-                            next[newKey] = newVariantId;
-                            return next;
-                          });
-                          setDraftQtys((prev) => {
-                            const next = { ...prev };
-                            next[newKey] = next[oldKey] ?? '';
-                            delete next[oldKey];
-                            return next;
-                          });
-                          setDraftRates((prev) => {
-                            const next = { ...prev };
-                            next[newKey] = next[oldKey] ?? '';
-                            delete next[oldKey];
-                            return next;
-                          });
-                          setDraftWeights((prev) => {
-                            const next = { ...prev };
-                            next[newKey] = next[oldKey] ?? '';
-                            delete next[oldKey];
-                            return next;
-                          });
+                          setDraftVariants((prev) => ({ ...prev, [item._key]: newVariantId }));
                         };
 
                         return (

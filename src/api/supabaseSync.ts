@@ -30,4 +30,8 @@ export {
   deletePaymentRecord,
   deleteDispatchRecord,
   deleteReceiptRecord,
+  fetchChallans,
+  saveChallan,
+  saveChallans,
+  deleteChallanRecord,
 } from './supabaseClient';

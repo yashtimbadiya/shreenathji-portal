@@ -98,6 +98,17 @@ const navItems: NavItem[] = [
     ],
   },
   {
+    label: 'Production',
+    icon: <ClipboardList size={18} />,
+    section: 'production',
+    children: [
+      { label: 'Production Register', path: '/production'             },
+      { label: 'Add Challan',         path: '/production/new'         },
+      { label: 'Product Master',      path: '/production/master'      },
+      { label: 'Rate Card',           path: '/production/rate-card'   },
+    ],
+  },
+  {
     label: 'Vendors',
     path: '/vendors',
     icon: <Users size={18} />,

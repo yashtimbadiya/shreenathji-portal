@@ -23,6 +23,10 @@ import {
   fetchActivityLogs,
   fetchReferences,
   fetchSharedVariants,
+  fetchChallans,
+  saveChallan,
+  saveChallans,
+  deleteChallanRecord,
   saveCategory,
   saveProduct,
   saveJobWork,
@@ -66,7 +70,10 @@ import type {
   Toast,
   User,
   Vendor,
+  Challan,
 } from '../types';
+import { parseProductMaster, deriveCategory } from '../api/productMasterImport';
+import { parseChallanRegister, isInternalParty } from '../api/challanImport';
 
 interface AppState {
   currentUser: User | null;
@@ -82,6 +89,7 @@ interface AppState {
   activityLogs: ActivityLog[];
   references: ReferenceRecord[];
   sharedVariants: SharedVariant[];
+  challans: Challan[];
   stockTransactions: StockTransaction[];
   toasts: Toast[];
   jobCounter: number;
@@ -162,6 +170,14 @@ interface AppState {
   addReference: (ref: Omit<ReferenceRecord, 'id'>) => void;
   updateReference: (id: string, data: Partial<ReferenceRecord>) => void;
   deleteReference: (id: string) => void;
+
+  /** Import the product-master sheet (tab 2). Creates categories + products. */
+  importProductMaster: (file: File) => Promise<{ ok: boolean; message: string }>;
+  /** Import the challan register (tab 4). Creates challans + auto-creates vendors. */
+  importChallanRegister: (file: File) => Promise<{ ok: boolean; message: string }>;
+  addChallan: (challan: Omit<Challan, 'id'>) => Challan | null;
+  updateChallan: (id: string, data: Partial<Challan>) => void;
+  deleteChallan: (id: string) => void;
 
   addSharedVariant: (sv: Omit<SharedVariant, 'id' | 'createdDate'>) => void;
   seedDefaultSharedVariants: () => void;
@@ -269,6 +285,7 @@ const BOOTSTRAP_STATE = {
   activityLogs: [] as ActivityLog[],
   references: [] as ReferenceRecord[],
   sharedVariants: [] as SharedVariant[],
+  challans: [] as Challan[],
   stockTransactions: [] as StockTransaction[],
   jobCounter: 0,
   availableJobNumbers: [] as number[],
@@ -294,6 +311,7 @@ export const useAppStore = create<AppState>()(
       activityLogs: BOOTSTRAP_STATE.activityLogs,
       references: BOOTSTRAP_STATE.references,
       sharedVariants: BOOTSTRAP_STATE.sharedVariants,
+      challans: BOOTSTRAP_STATE.challans,
       stockTransactions: BOOTSTRAP_STATE.stockTransactions,
       toasts: [],
       jobCounter: BOOTSTRAP_STATE.jobCounter,
@@ -319,6 +337,7 @@ export const useAppStore = create<AppState>()(
           activityLogs: BOOTSTRAP_STATE.activityLogs,
           references: BOOTSTRAP_STATE.references,
           sharedVariants: BOOTSTRAP_STATE.sharedVariants,
+          challans: BOOTSTRAP_STATE.challans,
           stockTransactions: BOOTSTRAP_STATE.stockTransactions,
           toasts: [],
           jobCounter: BOOTSTRAP_STATE.jobCounter,
@@ -705,7 +724,7 @@ export const useAppStore = create<AppState>()(
       // Uses IndexedDB as the source of truth; falls back gracefully if empty.
       loadLocalData: async () => {
         try {
-          const [categories, products, jobWorks, vendors, receipts, dispatches, payments, activityLogs, references, sharedVariants] =
+          const [categories, products, jobWorks, vendors, receipts, dispatches, payments, activityLogs, references, sharedVariants, challans] =
             await Promise.all([
               fetchCategories(),
               fetchProducts(),
@@ -717,6 +736,7 @@ export const useAppStore = create<AppState>()(
               fetchActivityLogs(),
               fetchReferences(),
               fetchSharedVariants(),
+              fetchChallans(),
             ]);
 
           const currentYear = new Date().getFullYear();
@@ -786,6 +806,7 @@ export const useAppStore = create<AppState>()(
             stockTransactions: shouldSeedDemoData ? STOCK_TRANSACTIONS : get().stockTransactions,
             references: references ?? [],
             sharedVariants: sharedVariants ?? [],
+            challans: challans ?? [],
             jobCounter: maxJobCounter,
             availableJobNumbers: get().jobNumberPoolYear === currentYear ? get().availableJobNumbers : [],
             jobNumberPoolYear: currentYear,
@@ -1222,6 +1243,224 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ references: s.references.filter((r) => r.id !== id) }));
         void deleteReferenceRecord(id);
         get().addToast('Reference deleted');
+        scheduleBackup();
+      },
+
+      // ── Product master import (tab 2) ───────────────────────────────────────
+      importProductMaster: async (file) => {
+        const result = await parseProductMaster(file);
+        if (!result.ok) {
+          get().addToast(result.message, 'error');
+          return { ok: false, message: result.message };
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+
+        // 1. Ensure a Category exists for every derived category name (case-insensitive)
+        const categoriesByName = new Map(
+          get().categories.map((c) => [c.name.trim().toUpperCase(), c]),
+        );
+        const newCategories: Category[] = [];
+        for (const catName of result.categories) {
+          if (!categoriesByName.has(catName.toUpperCase())) {
+            const cat: Category = {
+              id: generateId('cat'),
+              name: catName,
+              status: 'Active',
+              createdDate: today,
+              productCount: 0,
+            };
+            categoriesByName.set(catName.toUpperCase(), cat);
+            newCategories.push(cat);
+          }
+        }
+
+        // 2. Upsert products keyed by name (case-insensitive) — update in place if exists
+        const productsByName = new Map(
+          get().products.map((p) => [p.name.trim().toUpperCase(), p]),
+        );
+        const productsToSave: Product[] = [];
+        let created = 0;
+        let updated = 0;
+
+        for (const row of result.rows) {
+          const catId = categoriesByName.get(deriveCategory(row.name).toUpperCase())!.id;
+          const existing = productsByName.get(row.name.trim().toUpperCase());
+          if (existing) {
+            const merged: Product = {
+              ...existing,
+              categoryId: catId,
+              code: row.code || existing.code,
+              rate: row.rate ?? existing.rate,
+              spec: { ...existing.spec, ...row.spec },
+            };
+            productsByName.set(row.name.trim().toUpperCase(), merged);
+            productsToSave.push(merged);
+            updated++;
+          } else {
+            const p: Product = {
+              id: generateId('p'),
+              categoryId: catId,
+              name: row.name,
+              code: row.code,
+              unit: 'Pic',
+              createdAt: new Date().toISOString(),
+              rate: row.rate,
+              status: 'Active',
+              variants: [],
+              spec: row.spec,
+            };
+            productsByName.set(row.name.trim().toUpperCase(), p);
+            productsToSave.push(p);
+            created++;
+          }
+        }
+
+        // 3. Recompute productCount per category
+        const allProducts = [...productsByName.values()];
+        const allCategories = [...categoriesByName.values()].map((c) => ({
+          ...c,
+          productCount: allProducts.filter((p) => p.categoryId === c.id).length,
+        }));
+
+        // 4. Commit to state + persist
+        set({ categories: allCategories, products: allProducts });
+        allCategories.forEach((c) => void saveCategory(c));
+        productsToSave.forEach((p) => void saveProduct(p));
+
+        const message = `Imported ${created} new + ${updated} updated products, ${newCategories.length} new categories.`;
+        get().addToast(message);
+        get().addActivity('product', 'import', message);
+        scheduleBackup();
+        return { ok: true, message };
+      },
+
+      // ── Challan register import (tab 4) ─────────────────────────────────────
+      importChallanRegister: async (file) => {
+        const result = await parseChallanRegister(file);
+        if (!result.ok) {
+          get().addToast(result.message, 'error');
+          return { ok: false, message: result.message };
+        }
+
+        // 1. Auto-create Vendors for real (non-internal) party names
+        const vendorsByName = new Map(
+          get().vendors.map((v) => [v.name.trim().toUpperCase(), v]),
+        );
+        const newVendors: Vendor[] = [];
+        for (const party of result.partyNames) {
+          const key = party.trim().toUpperCase();
+          if (key && !vendorsByName.has(key)) {
+            const v: Vendor = {
+              id: generateId('v'),
+              name: party.trim(),
+              contactPerson: '',
+              mobile: '',
+              gstNumber: '',
+              specialization: '',
+              status: 'Active',
+              createdAt: new Date().toISOString(),
+            };
+            vendorsByName.set(key, v);
+            newVendors.push(v);
+          }
+        }
+
+        // 2. Build product lookup by name (primary) and folderNo+designNo (fallback)
+        const productByName = new Map(
+          get().products.map((p) => [p.name.trim().toUpperCase(), p]),
+        );
+        const productByFolderDesign = new Map(
+          get().products
+            .filter((p) => p.spec?.folderNo)
+            .map((p) => [`${p.spec!.folderNo}|${p.spec!.designNo ?? ''}`.toUpperCase(), p]),
+        );
+
+        // 3. Build challan records, keyed by challanNumber (upsert)
+        const challansByNumber = new Map(
+          get().challans.map((c) => [c.challanNumber, c]),
+        );
+        let unmatchedProducts = 0;
+
+        for (const row of result.rows) {
+          const prod =
+            productByName.get(row.productName.trim().toUpperCase()) ??
+            productByFolderDesign.get(`${row.folderNo}|${row.designNo}`.toUpperCase());
+          if (!prod) unmatchedProducts++;
+
+          const vendor = isInternalParty(row.partyName)
+            ? undefined
+            : vendorsByName.get(row.partyName.trim().toUpperCase());
+
+          const existing = challansByNumber.get(row.challanNumber);
+          const challan: Challan = {
+            id: existing?.id ?? generateId('chl'),
+            challanNumber: row.challanNumber,
+            date: row.date,
+            productName: row.productName,
+            productId: prod?.id,
+            designNo: row.designNo,
+            pick: row.pick,
+            folderNo: row.folderNo,
+            partyName: row.partyName,
+            vendorId: vendor?.id,
+            machinePatti: row.machinePatti,
+            mtrPerPic: row.mtrPerPic,
+            lines: row.lines,
+            totalPieces: row.totalPieces,
+            totalMeters: row.totalMeters,
+            source: 'import',
+          };
+          challansByNumber.set(row.challanNumber, challan);
+        }
+
+        const allChallans = [...challansByNumber.values()];
+        const allVendors = [...vendorsByName.values()];
+
+        // 4. Commit + persist
+        set({ vendors: allVendors, challans: allChallans });
+        newVendors.forEach((v) => void saveVendor(v));
+        void saveChallans(allChallans);
+
+        const message =
+          `Imported ${result.rows.length} challans, ${newVendors.length} new vendors` +
+          (unmatchedProducts > 0 ? `, ${unmatchedProducts} rows had no matching product (linked by name only).` : '.');
+        get().addToast(message);
+        get().addActivity('challan', 'import', message);
+        scheduleBackup();
+        return { ok: true, message };
+      },
+
+      addChallan: (challan) => {
+        const exists = get().challans.some(
+          (c) => c.challanNumber.trim().toLowerCase() === challan.challanNumber.trim().toLowerCase(),
+        );
+        if (exists) {
+          get().addToast(`Challan "${challan.challanNumber}" already exists`, 'error');
+          return null;
+        }
+        const record: Challan = { ...challan, id: generateId('chl'), source: challan.source ?? 'manual' };
+        set((s) => ({ challans: [record, ...s.challans] }));
+        void saveChallan(record);
+        get().addToast(`Challan "${record.challanNumber}" added`);
+        get().addActivity('challan', record.id, `Challan ${record.challanNumber} created`);
+        scheduleBackup();
+        return record;
+      },
+
+      updateChallan: (id, data) => {
+        set((s) => ({
+          challans: s.challans.map((c) => (c.id === id ? { ...c, ...data } : c)),
+        }));
+        const updated = get().challans.find((c) => c.id === id);
+        if (updated) void saveChallan(updated);
+        scheduleBackup();
+      },
+
+      deleteChallan: (id) => {
+        set((s) => ({ challans: s.challans.filter((c) => c.id !== id) }));
+        void deleteChallanRecord(id);
+        get().addToast('Challan deleted');
         scheduleBackup();
       },
 
